@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { Home, Sparkles, Upload, LayoutDashboard, LogIn, LogOut, Settings, LayoutGrid } from 'lucide-react';
+import { Home, Sparkles, Upload, LayoutDashboard, LogIn, LogOut, Settings, LayoutGrid, UserCircle } from 'lucide-react';
 import { User } from '../types';
 import { storeService } from '../services/storeService';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
@@ -24,6 +24,7 @@ export const Navigation: React.FC<NavigationProps> = ({ user, onLogout }) => {
 
   const customerTabs = [
     { id: 'gallery', path: '/collection', icon: LayoutGrid, label: 'Catalog' },
+    { id: 'profile', path: '/profile', icon: UserCircle, label: 'Profile' },
   ];
 
   const staffTabs = [
@@ -33,7 +34,7 @@ export const Navigation: React.FC<NavigationProps> = ({ user, onLogout }) => {
     { id: 'settings', path: '/admin/settings', icon: Settings, label: 'Prefs' },
   ];
 
-  const activeTabs = isStaff ? [...customerTabs, ...staffTabs] : (user ? customerTabs : []);
+  const activeTabs = isStaff ? [...customerTabs.filter(t => t.id === 'gallery'), ...staffTabs] : (user ? customerTabs : []);
 
   const isActive = (path: string) => {
     if (path === '/' && location.pathname !== '/') return false;

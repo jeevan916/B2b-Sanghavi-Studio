@@ -407,8 +407,14 @@ app.get('/api/customers', async (req, res) => {
 
 app.get('/api/customers/check/:phone', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT name, pincode, isVerified, accessExpiresAt, address FROM customers WHERE phone=?', [req.params.phone]);
-        res.json({ exists: !!rows[0], user: rows[0] || null });
+        const [rows] = await pool.query('SELECT * FROM customers WHERE phone=?', [req.params.phone]);
+        if (rows[0]) {
+            // Don't send full history unless authenticated, just profile basics
+            const { id, name, pincode, isVerified, accessExpiresAt, address } = rows[0];
+            res.json({ exists: true, user: { id, name, pincode, isVerified, accessExpiresAt, address } });
+        } else {
+            res.json({ exists: false, user: null });
+        }
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -522,7 +528,16 @@ app.get('/api/shared-links/:token', async (req, res) => {
 
 app.get('/api/orders', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT * FROM orders ORDER BY createdAt DESC');
+        const { customerId } = req.query;
+        let query = 'SELECT * FROM orders ORDER BY createdAt DESC';
+        let params = [];
+        
+        if (customerId) {
+            query = 'SELECT * FROM orders WHERE customerId = ? ORDER BY createdAt DESC';
+            params = [customerId];
+        }
+        
+        const [rows] = await pool.query(query, params);
         res.json(rows.map(r => parseJson(r, ['items', 'deliveryDetails'])));
     } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -84,10 +84,14 @@ const Landing = lazy(() => import('./pages/Landing').then(m => ({ default: m.Lan
 const Gallery = lazy(() => import('./pages/Gallery').then(m => ({ default: m.Gallery })));
 const UploadWizard = lazy(() => import('./pages/UploadWizard').then(m => ({ default: m.UploadWizard })));
 const DesignStudio = lazy(() => import('./pages/DesignStudio').then(m => ({ default: m.DesignStudio })));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
-const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
-const CustomerLogin = lazy(() => import('./pages/CustomerLogin').then(m => ({ default: m.CustomerLogin })));
-const StaffLogin = lazy(() => import('./pages/StaffLogin').then(m => ({ default: m.StaffLogin })));
+
+// Explicitly cast to React.FC with props to avoid IntrinsicAttributes errors
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard }))) as React.FC<{ onNavigate?: (tab: string) => void }>;
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings }))) as React.FC<{ onBack?: () => void }>;
+const CustomerLogin = lazy(() => import('./pages/CustomerLogin').then(m => ({ default: m.CustomerLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
+const StaffLogin = lazy(() => import('./pages/StaffLogin').then(m => ({ default: m.StaffLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
+const CustomerProfile = lazy(() => import('./pages/CustomerProfile').then(m => ({ default: m.CustomerProfile })));
+
 const ProductDetails = lazy(() => import('./pages/ProductDetails').then(m => ({ default: m.ProductDetails })));
 const Consultant = lazy(() => import('./pages/Consultant').then(m => ({ default: m.Consultant })));
 const SharedLanding = lazy(() => import('./pages/SharedLanding').then(m => ({ default: m.SharedLanding })));
@@ -162,6 +166,7 @@ function AppContent() {
             <Route path="/collection" element={<Gallery />} />
             <Route path="/product/:id" element={<ProductDetails />} />
             <Route path="/shared/:token" element={<SharedLanding />} />
+            <Route path="/profile" element={user ? <CustomerProfile /> : <Navigate to="/login" replace />} />
             <Route 
                 path="/login" 
                 element={

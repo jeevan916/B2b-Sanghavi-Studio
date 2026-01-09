@@ -268,6 +268,21 @@ export const storeService = {
           method: 'PUT',
           body: JSON.stringify(updates)
       });
+      // Update local storage if updating self
+      const currentUser = storeService.getCurrentUser();
+      if(currentUser && currentUser.id === userId) {
+          localStorage.setItem(KEYS.SESSION, JSON.stringify({ ...currentUser, ...updates }));
+      }
+  },
+
+  refreshUserProfile: async (phone: string): Promise<User | null> => {
+      const check = await storeService.checkCustomerExistence(phone.replace(/\D/g, ''));
+      if(check.exists && check.user) {
+          const updatedUser = { ...check.user, role: 'customer' }; 
+          localStorage.setItem(KEYS.SESSION, JSON.stringify(updatedUser));
+          return updatedUser;
+      }
+      return null;
   },
 
   requestRenewal: async () => {
@@ -510,9 +525,10 @@ I'm interested in: ${product.title} (ID: #${product.id.slice(-6).toUpperCase()})
       return await apiFetch('/orders', { method: 'POST', body: JSON.stringify(order) });
   },
 
-  getOrders: async (): Promise<Order[]> => {
+  getOrders: async (customerId?: string): Promise<Order[]> => {
       try {
-          const data = await apiFetch('/orders');
+          const query = customerId ? `?customerId=${customerId}` : '';
+          const data = await apiFetch(`/orders${query}`);
           return Array.isArray(data) ? data : [];
       } catch (e) { return []; }
   },
