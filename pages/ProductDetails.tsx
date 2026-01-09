@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Product, AppConfig, ProductSuggestion } from '../types';
@@ -6,11 +7,13 @@ import { ImageViewer } from '../components/ImageViewer';
 import { ImageEditor } from '../components/ImageEditor';
 import { storeService, ProductStats } from '../services/storeService';
 import { removeWatermark, enhanceJewelryImage } from '../services/geminiService';
+import { useCart } from '../contexts/CartContext';
 
 export const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { addToCart } = useCart();
   
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,6 +109,18 @@ export const ProductDetails: React.FC = () => {
         else navigateToSibling('next');
     }
     touchStart.current = null;
+  };
+
+  const handleAddToCart = () => {
+      if (isGuest) {
+          navigate('/login');
+          return;
+      }
+      if (product) {
+          addToCart(product);
+          // Optional visual feedback
+          alert("Added to B2B Order Cart");
+      }
   };
 
   if (isLoading) {
@@ -224,10 +239,10 @@ export const ProductDetails: React.FC = () => {
 
              <div className="flex gap-4">
                 <button 
-                  onClick={() => isGuest ? navigate('/login') : storeService.shareToWhatsApp(product)} 
-                  className="flex-1 py-4 bg-gold-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-gold-700 transition active:scale-[0.98]"
+                  onClick={handleAddToCart}
+                  className="flex-1 py-4 bg-stone-900 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-gold-600 transition active:scale-[0.98]"
                 >
-                  <MessageCircle size={20} /> {isGuest ? 'Login to Inquire' : 'Inquire on WhatsApp'}
+                  <ShoppingBag size={20} /> {isGuest ? 'Login to Order' : 'Add to Order Cart'}
                 </button>
              </div>
           </div>

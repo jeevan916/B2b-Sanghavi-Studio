@@ -1,9 +1,13 @@
+
 import React, { Component, useState, Suspense, lazy, useEffect, ReactNode, ErrorInfo } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Navigation } from './components/Navigation';
 import { storeService } from './services/storeService';
 import { User } from './types';
 import { UploadProvider } from './contexts/UploadContext';
+import { CartProvider, useCart } from './contexts/CartContext';
+import { CartDrawer } from './components/CartDrawer';
+import { ShoppingBag } from 'lucide-react';
 
 // Safe Loader Component (No external dependencies)
 const SafeLoader = () => (
@@ -71,7 +75,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       );
     }
     
-    // Explicitly cast this to avoid TS error: Property 'props' does not exist on type 'ErrorBoundary'
     return (this as any).props.children;
   }
 }
@@ -102,6 +105,26 @@ const AuthGuard = ({ children, allowedRoles, user }: AuthGuardProps) => {
   }
   if (!allowedRoles.includes(user.role)) return <Navigate to="/collection" replace />;
   return <>{children}</>;
+};
+
+const CartFAB: React.FC = () => {
+    const { totalItems, setIsCartOpen } = useCart();
+    const location = useLocation();
+    const isStaff = location.pathname.startsWith('/admin') || location.pathname.startsWith('/staff');
+    
+    if (totalItems === 0 || isStaff) return null;
+
+    return (
+        <button 
+            onClick={() => setIsCartOpen(true)}
+            className="fixed bottom-24 right-4 z-40 bg-stone-900 text-white p-4 rounded-full shadow-2xl flex items-center justify-center animate-in slide-in-from-bottom-8 hover:scale-105 transition-transform"
+        >
+            <ShoppingBag size={24} />
+            <div className="absolute -top-1 -right-1 w-5 h-5 bg-gold-600 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white">
+                {totalItems}
+            </div>
+        </button>
+    );
 };
 
 function AppContent() {
@@ -161,6 +184,8 @@ function AppContent() {
       </main>
 
       <Navigation user={user} onLogout={handleLogout} />
+      <CartFAB />
+      <CartDrawer />
     </div>
   );
 }
@@ -169,7 +194,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <UploadProvider>
-        <AppContent />
+        <CartProvider>
+            <AppContent />
+        </CartProvider>
       </UploadProvider>
     </ErrorBoundary>
   );

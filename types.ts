@@ -22,6 +22,12 @@ export type Product = {
   };
 };
 
+export interface CartItem {
+  product: Product;
+  quantity: number;
+  notes?: string;
+}
+
 export type UserRole = 'customer' | 'contributor' | 'admin';
 
 export type User = {
@@ -79,7 +85,7 @@ export interface AppConfig {
 
 export interface AnalyticsEvent {
   id: string;
-  type: 'inquiry' | 'screenshot' | 'view' | 'like' | 'dislike' | 'download' | 'login' | 'sold' | 'long_press';
+  type: 'inquiry' | 'screenshot' | 'view' | 'like' | 'dislike' | 'download' | 'login' | 'sold' | 'long_press' | 'b2b_order';
   productId?: string;
   productTitle?: string;
   category?: string;
@@ -97,7 +103,7 @@ export interface AnalyticsEvent {
   timestamp: string;
   imageIndex?: number;
   duration?: number; // Time spent in seconds
-  meta?: any; // Detailed device stats (screen res, etc)
+  meta?: any; // Detailed device stats or Order Details
 }
 
 export interface ProductSuggestion {

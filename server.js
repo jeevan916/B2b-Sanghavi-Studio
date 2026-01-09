@@ -111,6 +111,15 @@ const createTables = async () => {
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN category VARCHAR(100)`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN weight DECIMAL(10,3)`); } catch (e) {}
         
+        // Auto-seed Admin if table is empty
+        const [staffCount] = await pool.query('SELECT COUNT(*) as count FROM staff');
+        if (staffCount[0].count === 0) {
+            console.log('[Database] Seeding default admin user (admin/admin123)...');
+            await pool.query('INSERT INTO staff (id, username, password, role, isActive, name, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)', 
+                [crypto.randomUUID(), 'admin', 'admin123', 'admin', true, 'System Admin', new Date()]
+            );
+        }
+
         console.log(`[Database] Schema synchronization complete.`);
     } catch (err) {
         console.error('[Database] Schema Error:', err.message);

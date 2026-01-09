@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { Product } from '../types';
-import { Share2, MessageCircle, ChevronLeft, ChevronRight, Maximize2, Heart } from 'lucide-react';
+import { Share2, Plus, ChevronLeft, ChevronRight, Maximize2, Heart, ShoppingBag } from 'lucide-react';
 import { storeService } from '../services/storeService';
+import { useCart } from '../contexts/CartContext';
 
 interface ProductCardProps {
   product: Product;
@@ -13,6 +15,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
   const isGuest = !storeService.getCurrentUser();
+  const { addToCart } = useCart();
 
   useEffect(() => {
     const likes = storeService.getLikes();
@@ -27,10 +30,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
     if (liked) storeService.logEvent('like', product);
   };
 
-  const handleInquiry = async (e: React.MouseEvent) => {
+  const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (navigator.vibrate) navigator.vibrate(10);
-    await storeService.shareToWhatsApp(product, currentImageIndex);
+    addToCart(product);
   };
 
   const getImageUrl = (path: string) => {
@@ -77,8 +79,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
         </div>
         
         <div className="flex gap-2 mt-auto">
-          <button onClick={handleInquiry} className="flex-1 bg-gold-600 text-white text-[10px] py-2.5 rounded-lg hover:bg-gold-700 transition flex items-center justify-center gap-2 font-bold uppercase tracking-widest">
-            <MessageCircle size={14} /> Inquire
+          <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white text-[10px] py-2.5 rounded-lg hover:bg-gold-600 transition flex items-center justify-center gap-2 font-bold uppercase tracking-widest">
+            <ShoppingBag size={14} /> Add to Order
           </button>
           <button onClick={(e) => { e.stopPropagation(); navigator.share?.({ title: product.title, url: window.location.href }); }} className="p-2 text-stone-400 hover:text-gold-600 border border-stone-200 rounded-lg">
             <Share2 size={16} />

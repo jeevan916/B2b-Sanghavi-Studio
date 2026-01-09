@@ -4,6 +4,9 @@ import { Navigation } from './components/Navigation';
 import { storeService } from './services/storeService';
 import { User } from './types';
 import { UploadProvider } from './contexts/UploadContext';
+import { CartProvider, useCart } from './contexts/CartContext';
+import { CartDrawer } from './components/CartDrawer';
+import { ShoppingBag } from 'lucide-react';
 
 // Safe Loader Component (No external dependencies)
 const SafeLoader = () => (
@@ -26,7 +29,6 @@ interface ErrorBoundaryState {
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = { hasError: false };
-  // explicit props declaration removed to avoid TS conflict with Component
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
@@ -72,7 +74,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       );
     }
     
-    // Explicitly cast this to avoid TS error: Property 'props' does not exist on type 'ErrorBoundary'
     return (this as any).props.children;
   }
 }
@@ -82,10 +83,13 @@ const Landing = lazy(() => import('./pages/Landing').then(m => ({ default: m.Lan
 const Gallery = lazy(() => import('./pages/Gallery').then(m => ({ default: m.Gallery })));
 const UploadWizard = lazy(() => import('./pages/UploadWizard').then(m => ({ default: m.UploadWizard })));
 const DesignStudio = lazy(() => import('./pages/DesignStudio').then(m => ({ default: m.DesignStudio })));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
-const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
-const CustomerLogin = lazy(() => import('./pages/CustomerLogin').then(m => ({ default: m.CustomerLogin })));
-const StaffLogin = lazy(() => import('./pages/StaffLogin').then(m => ({ default: m.StaffLogin })));
+
+// Explicitly cast to React.FC with props to avoid IntrinsicAttributes errors
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard }))) as React.FC<{ onNavigate?: (tab: string) => void }>;
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings }))) as React.FC<{ onBack?: () => void }>;
+const CustomerLogin = lazy(() => import('./pages/CustomerLogin').then(m => ({ default: m.CustomerLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
+const StaffLogin = lazy(() => import('./pages/StaffLogin').then(m => ({ default: m.StaffLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
+
 const ProductDetails = lazy(() => import('./pages/ProductDetails').then(m => ({ default: m.ProductDetails })));
 const Consultant = lazy(() => import('./pages/Consultant').then(m => ({ default: m.Consultant })));
 const SharedLanding = lazy(() => import('./pages/SharedLanding').then(m => ({ default: m.SharedLanding })));
@@ -103,6 +107,26 @@ const AuthGuard = ({ children, allowedRoles, user }: AuthGuardProps) => {
   }
   if (!allowedRoles.includes(user.role)) return <Navigate to="/collection" replace />;
   return <>{children}</>;
+};
+
+const CartFAB: React.FC = () => {
+    const { totalItems, setIsCartOpen } = useCart();
+    const location = useLocation();
+    const isStaff = location.pathname.startsWith('/admin') || location.pathname.startsWith('/staff');
+    
+    if (totalItems === 0 || isStaff) return null;
+
+    return (
+        <button 
+            onClick={() => setIsCartOpen(true)}
+            className="fixed bottom-24 right-4 z-40 bg-stone-900 text-white p-4 rounded-full shadow-2xl flex items-center justify-center animate-in slide-in-from-bottom-8 hover:scale-105 transition-transform"
+        >
+            <ShoppingBag size={24} />
+            <div className="absolute -top-1 -right-1 w-5 h-5 bg-gold-600 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white">
+                {totalItems}
+            </div>
+        </button>
+    );
 };
 
 function AppContent() {
@@ -162,6 +186,8 @@ function AppContent() {
       </main>
 
       <Navigation user={user} onLogout={handleLogout} />
+      <CartFAB />
+      <CartDrawer />
     </div>
   );
 }
@@ -170,7 +196,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <UploadProvider>
-        <AppContent />
+        <CartProvider>
+            <AppContent />
+        </CartProvider>
       </UploadProvider>
     </ErrorBoundary>
   );

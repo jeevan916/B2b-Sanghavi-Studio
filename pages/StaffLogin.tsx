@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { storeService, HealthStatus } from '../services/storeService';
 import { User } from '../types';
-import { Lock, User as UserIcon, Shield, Loader2, AlertCircle, ArrowLeft, Wifi, WifiOff } from 'lucide-react';
+import { Lock, User as UserIcon, Shield, Loader2, AlertCircle, ArrowLeft, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 
 export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
@@ -11,19 +11,25 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [checkingHealth, setCheckingHealth] = useState(false);
   const navigate = useNavigate();
 
   // Check system health on load to ensure backend is reachable
+  const checkStatus = async () => {
+      setCheckingHealth(true);
+      const status = await storeService.checkServerHealth();
+      setHealth(status);
+      if (!status.healthy && status.reason) {
+          setError(`System Alert: ${status.reason}`);
+      } else {
+          setError('');
+      }
+      setCheckingHealth(false);
+  };
+
   useEffect(() => {
-    const checkStatus = async () => {
-        const status = await storeService.checkServerHealth();
-        setHealth(status);
-        if (!status.healthy && status.reason) {
-            setError(`System Alert: ${status.reason}`);
-        }
-    };
     checkStatus();
-    const timer = setInterval(checkStatus, 15000);
+    const timer = setInterval(checkStatus, 30000);
     return () => clearInterval(timer);
   }, []);
 
@@ -81,7 +87,6 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
                 className="w-full bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-teal-500/50 outline-none placeholder:text-slate-600 transition-all"
                 placeholder="Username"
                 required
-                disabled={health !== null && !health.healthy}
               />
             </div>
           </div>
@@ -98,7 +103,6 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
                 className="w-full bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-teal-500/50 outline-none placeholder:text-slate-600 transition-all"
                 placeholder="••••••••"
                 required
-                disabled={health !== null && !health.healthy}
               />
             </div>
           </div>
@@ -107,7 +111,7 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 text-red-400 text-xs animate-in slide-in-from-top-2">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
               <div className="flex flex-col gap-1">
-                <span className="font-bold">Authentication Blocked</span>
+                <span className="font-bold">Access Alert</span>
                 <span>{error}</span>
               </div>
             </div>
@@ -115,8 +119,8 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
 
           <button 
             type="submit" 
-            disabled={isLoading || (health !== null && !health.healthy)}
-            className="w-full bg-white text-slate-950 py-4 rounded-2xl font-bold hover:bg-teal-400 transition-all flex items-center justify-center gap-2 shadow-xl shadow-teal-500/5 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isLoading}
+            className="w-full bg-white text-slate-950 py-4 rounded-2xl font-bold hover:bg-teal-400 transition-all flex items-center justify-center gap-2 shadow-xl shadow-teal-500/5 disabled:opacity-50"
           >
             {isLoading ? <Loader2 className="animate-spin" size={20}/> : <Lock size={20}/>}
             {isLoading ? 'Authorizing...' : 'Secure Login'}
@@ -130,12 +134,15 @@ export const StaffLogin: React.FC<{ onLoginSuccess: (u: User) => void }> = ({ on
                     <Wifi size={12} /> System Online
                 </span>
             ) : (
-                <span className="flex items-center gap-1.5 text-[10px] text-red-500 font-bold uppercase tracking-tighter animate-pulse">
-                    <WifiOff size={12} /> System Offline
+                <span className="flex items-center gap-1.5 text-[10px] text-red-500 font-bold uppercase tracking-tighter">
+                    <WifiOff size={12} /> {checkingHealth ? 'Checking...' : 'System Offline'}
                 </span>
             )}
+            <button onClick={checkStatus} disabled={checkingHealth} className="p-1 hover:bg-slate-800 rounded-full transition text-slate-500">
+                <RefreshCw size={12} className={checkingHealth ? 'animate-spin' : ''}/>
+            </button>
           </div>
-          <p className="text-[9px] text-slate-600 uppercase font-bold tracking-widest">Auth v3.2</p>
+          <p className="text-[9px] text-slate-600 uppercase font-bold tracking-widest">Auth v3.3</p>
         </div>
         
         {!health?.healthy && health?.reason && (
