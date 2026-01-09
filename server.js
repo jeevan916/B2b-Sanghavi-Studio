@@ -87,7 +87,8 @@ const createTables = async () => {
             )`,
             `CREATE TABLE IF NOT EXISTS customers (
                 id VARCHAR(255) PRIMARY KEY, phone VARCHAR(50) UNIQUE, name VARCHAR(255),
-                pincode VARCHAR(20), lastLocation JSON, role VARCHAR(50), createdAt DATETIME
+                pincode VARCHAR(20), lastLocation JSON, role VARCHAR(50), createdAt DATETIME,
+                isVerified BOOLEAN DEFAULT FALSE, accessExpiresAt DATETIME
             )`,
             `CREATE TABLE IF NOT EXISTS app_config (id INT PRIMARY KEY DEFAULT 1, data JSON, CHECK (id = 1))`,
             `CREATE TABLE IF NOT EXISTS analytics (
@@ -101,11 +102,18 @@ const createTables = async () => {
             `CREATE TABLE IF NOT EXISTS suggestions (
                 id VARCHAR(255) PRIMARY KEY, productId VARCHAR(255), userId VARCHAR(255), 
                 userName VARCHAR(255), userPhone VARCHAR(50), suggestion TEXT, createdAt DATETIME
+            )`,
+            `CREATE TABLE IF NOT EXISTS orders (
+                id VARCHAR(255) PRIMARY KEY, customerId VARCHAR(255), customerName VARCHAR(255),
+                customerPhone VARCHAR(255), items JSON, totalItems INT, totalWeight DECIMAL(10,3),
+                status VARCHAR(50), deliveryDetails JSON, createdAt DATETIME, updatedAt DATETIME
             )`
         ];
         for (const query of tables) await pool.query(query);
 
         // Migrations
+        try { await pool.query(`ALTER TABLE customers ADD COLUMN isVerified BOOLEAN DEFAULT FALSE`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE customers ADD COLUMN accessExpiresAt DATETIME`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN duration INT DEFAULT 0`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN meta JSON`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN category VARCHAR(100)`); } catch (e) {}
@@ -152,7 +160,7 @@ const initDB = async () => {
 // Start DB
 initDB();
 
-// Keep-Alive Mechanism to prevent hostinger timeouts
+// Keep-Alive Mechanism
 setInterval(async () => {
     if (pool && dbStatus.healthy) {
         try {
@@ -162,7 +170,7 @@ setInterval(async () => {
             initDB();
         }
     }
-}, 60000); // Ping every minute
+}, 60000);
 
 const saveFile = async (base64, isThumb = false) => {
     if (!base64 || !base64.startsWith('data:image')) return base64;
@@ -185,171 +193,118 @@ const parseJson = (row, fields) => {
     return row;
 };
 
-// --- CORE API ENDPOINTS ---
+// --- API ROUTES ---
 
-// Dynamic Health Check
+// Health Check
 app.get('/api/health', async (req, res) => {
     try {
         if (!pool) throw new Error('Pool not initialized');
         await pool.query('SELECT 1');
-        dbStatus = { healthy: true, error: null }; // Update global status on success
+        dbStatus = { healthy: true, error: null };
         res.json({ status: 'online', healthy: true });
     } catch (err) {
         dbStatus = { healthy: false, error: err.message };
-        // Try to trigger reconnect if it's down
-        if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.message.includes('Pool')) {
-            initDB(); 
-        }
+        if (err.code === 'PROTOCOL_CONNECTION_LOST') initDB();
         res.json({ status: 'error', healthy: false, error: err.message });
     }
 });
 
-// Force Reconnect Endpoint (Admin util)
+// Admin Utils
 app.post('/api/reconnect', async (req, res) => {
     await initDB();
     res.json(dbStatus);
 });
 
-// CURATED COLLECTIONS ENDPOINT
+// -- PRODUCTS --
+
 app.get('/api/products/curated', async (req, res) => {
     try {
-        if (!dbStatus.healthy) throw new Error('Database disconnected');
-
+        if (!pool) throw new Error('DB Offline');
         const formatProducts = (rows) => rows.map(r => {
             const p = parseJson(r, ['thumbnails', 'images']);
             if (!Array.isArray(p.thumbnails)) p.thumbnails = [];
             return p;
         });
 
-        // 1. Latest Arrivals
-        const latestQuery = `SELECT id, title, category, weight, thumbnails, images, createdAt FROM products WHERE isHidden = FALSE ORDER BY createdAt DESC LIMIT 8`;
-        
-        // 2. Most Loved (Likes)
-        const lovedQuery = `
-            SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score 
-            FROM products p 
-            JOIN analytics a ON p.id = a.productId 
-            WHERE p.isHidden = FALSE AND a.type = 'like' 
-            GROUP BY p.id 
-            ORDER BY score DESC LIMIT 8`;
+        const [latest] = await pool.query('SELECT id, title, category, weight, thumbnails, images, createdAt FROM products WHERE isHidden = FALSE ORDER BY createdAt DESC LIMIT 8');
+        const [loved] = await pool.query(`SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score FROM products p JOIN analytics a ON p.id = a.productId WHERE p.isHidden = FALSE AND a.type = 'like' GROUP BY p.id ORDER BY score DESC LIMIT 8`);
+        const [trending] = await pool.query(`SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score FROM products p JOIN analytics a ON p.id = a.productId WHERE p.isHidden = FALSE AND a.timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY p.id ORDER BY score DESC LIMIT 8`);
+        const [ideal] = await pool.query(`SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score FROM products p JOIN analytics a ON p.id = a.productId WHERE p.isHidden = FALSE AND a.type = 'sold' GROUP BY p.id ORDER BY score DESC LIMIT 8`);
 
-        // 3. Trending (Views + Likes + Inquiries in last 30 days)
-        const trendingQuery = `
-            SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score 
-            FROM products p 
-            JOIN analytics a ON p.id = a.productId 
-            WHERE p.isHidden = FALSE AND a.timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY p.id 
-            ORDER BY score DESC LIMIT 8`;
-
-        // 4. Sanghavi Ideal (Most Sold/Purchased)
-        const idealQuery = `
-            SELECT p.id, p.title, p.category, p.weight, p.thumbnails, p.images, COUNT(a.id) as score 
-            FROM products p 
-            JOIN analytics a ON p.id = a.productId 
-            WHERE p.isHidden = FALSE AND a.type = 'sold' 
-            GROUP BY p.id 
-            ORDER BY score DESC LIMIT 8`;
-
-        const [latest] = await pool.query(latestQuery);
-        const [loved] = await pool.query(lovedQuery);
-        const [trending] = await pool.query(trendingQuery);
-        const [ideal] = await pool.query(idealQuery);
-
-        res.json({
-            latest: formatProducts(latest),
-            loved: formatProducts(loved),
-            trending: formatProducts(trending),
-            ideal: formatProducts(ideal)
-        });
-
+        res.json({ latest: formatProducts(latest), loved: formatProducts(loved), trending: formatProducts(trending), ideal: formatProducts(ideal) });
     } catch (err) {
-        console.error("Curated Fetch Error:", err);
         res.status(500).json({ error: err.message, latest: [], loved: [], trending: [], ideal: [] });
     }
 });
 
-// OPTIMIZED LIST ENDPOINT WITH SERVER-SIDE FILTERING
+app.get('/api/products/purchased', async (req, res) => {
+    try {
+        if (!pool) throw new Error('DB Offline');
+        const { userId } = req.query;
+        if (!userId) return res.json([]);
+
+        const [orders] = await pool.query('SELECT items FROM orders WHERE customerId = ? AND status IN ("confirmed", "dispatched")', [userId]);
+        const purchasedProductIds = new Set();
+        orders.forEach(row => {
+            const orderData = parseJson(row, ['items']);
+            if (Array.isArray(orderData.items)) {
+                orderData.items.forEach(item => {
+                    if (item.product && item.product.id) purchasedProductIds.add(item.product.id);
+                });
+            }
+        });
+
+        if (purchasedProductIds.size === 0) return res.json([]);
+        const placeholders = Array.from(purchasedProductIds).map(() => '?').join(',');
+        const [products] = await pool.query(`SELECT * FROM products WHERE id IN (${placeholders})`, Array.from(purchasedProductIds));
+        res.json(products.map(r => parseJson(r, ['tags', 'images', 'thumbnails', 'meta'])));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/products', async (req, res) => {
     try {
-        if (!dbStatus.healthy) throw new Error('Database disconnected');
-        
+        if (!pool) throw new Error('DB Offline');
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const offset = (page - 1) * limit;
         
-        // Filtering Params
         const publicOnly = req.query.publicOnly === 'true';
         const category = req.query.category;
         const subCategory = req.query.subCategory;
         const search = req.query.search;
 
-        console.log(`[API] Fetch Products: Page ${page}, Public: ${publicOnly}, Cat: ${category || 'All'}, Sub: ${subCategory || 'All'}`);
-
         let whereClauses = [];
         let params = [];
 
-        if (publicOnly) {
-            whereClauses.push('isHidden = FALSE');
-        }
-        if (category && category !== 'All' && category !== 'undefined') {
-            whereClauses.push('category = ?');
-            params.push(category);
-        }
-        if (subCategory && subCategory !== 'All' && subCategory !== 'undefined') {
-            whereClauses.push('subCategory = ?');
-            params.push(subCategory);
-        }
-        if (search && search !== 'undefined') {
-            whereClauses.push('(title LIKE ? OR description LIKE ?)');
-            params.push(`%${search}%`, `%${search}%`);
-        }
+        if (publicOnly) whereClauses.push('isHidden = FALSE');
+        if (category && category !== 'All' && category !== 'undefined') { whereClauses.push('category = ?'); params.push(category); }
+        if (subCategory && subCategory !== 'All' && subCategory !== 'undefined') { whereClauses.push('subCategory = ?'); params.push(subCategory); }
+        if (search && search !== 'undefined') { whereClauses.push('(title LIKE ? OR description LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
 
         const whereSql = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
-
-        // Get Total Count for Pagination
         const [countResult] = await pool.query(`SELECT COUNT(*) as total FROM products ${whereSql}`, params);
         const totalItems = countResult[0].total;
 
-        // Fetch Items
-        const query = `
-            SELECT id, title, category, subCategory, weight, thumbnails, isHidden, createdAt, dateTaken 
-            FROM products 
-            ${whereSql}
-            ORDER BY createdAt DESC 
-            LIMIT ? OFFSET ?`;
-            
-        const [rows] = await pool.query(query, [...params, limit, offset]);
-
-        const products = rows.map(r => {
-            const p = parseJson(r, ['thumbnails']);
-            if (!Array.isArray(p.thumbnails)) p.thumbnails = [];
-            return p;
-        });
+        const [rows] = await pool.query(`SELECT id, title, category, subCategory, weight, thumbnails, isHidden, createdAt, dateTaken FROM products ${whereSql} ORDER BY createdAt DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
 
         res.json({
-            items: products,
-            meta: {
-                page,
-                limit,
-                totalItems,
-                totalPages: Math.ceil(totalItems / limit)
-            }
+            items: rows.map(r => { const p = parseJson(r, ['thumbnails']); if(!Array.isArray(p.thumbnails)) p.thumbnails=[]; return p; }),
+            meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) }
         });
     } catch (err) { 
-        console.error("API Error:", err);
+        console.error("API Error /products:", err.message);
         res.status(500).json({ error: err.message }); 
     }
 });
 
 app.get('/api/products/:id', async (req, res) => {
     try {
-        if (!dbStatus.healthy) throw new Error('Database disconnected');
+        if (!pool) throw new Error('DB Offline');
         const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
         if (!rows[0]) return res.status(404).json({ error: 'Product not found' });
-        
-        const product = parseJson(rows[0], ['tags', 'images', 'thumbnails', 'meta']);
-        res.json(product);
+        res.json(parseJson(rows[0], ['tags', 'images', 'thumbnails', 'meta']));
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -358,8 +313,10 @@ app.post('/api/products', async (req, res) => {
         const p = req.body;
         const savedImgs = await Promise.all((p.images || []).map(img => saveFile(img, false)));
         const savedThumbs = await Promise.all((p.thumbnails || []).map(img => saveFile(img, true)));
-        const q = `INSERT INTO products (id, title, category, subCategory, weight, description, tags, images, thumbnails, supplier, uploadedBy, isHidden, createdAt, dateTaken, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        await pool.query(q, [p.id, p.title, p.category, p.subCategory, p.weight, p.description, JSON.stringify(p.tags), JSON.stringify(savedImgs), JSON.stringify(savedThumbs), p.supplier, p.uploadedBy, p.isHidden, new Date(), p.dateTaken, JSON.stringify(p.meta)]);
+        await pool.query(
+            `INSERT INTO products (id, title, category, subCategory, weight, description, tags, images, thumbnails, supplier, uploadedBy, isHidden, createdAt, dateTaken, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+            [p.id, p.title, p.category, p.subCategory, p.weight, p.description, JSON.stringify(p.tags), JSON.stringify(savedImgs), JSON.stringify(savedThumbs), p.supplier, p.uploadedBy, p.isHidden, new Date(), p.dateTaken, JSON.stringify(p.meta)]
+        );
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -369,8 +326,10 @@ app.put('/api/products/:id', async (req, res) => {
         const p = req.body;
         const imgs = await Promise.all((p.images || []).map(img => img.startsWith('data:') ? saveFile(img, false) : img));
         const thumbs = await Promise.all((p.thumbnails || []).map(img => img.startsWith('data:') ? saveFile(img, true) : img));
-        const q = `UPDATE products SET title=?, category=?, subCategory=?, weight=?, description=?, tags=?, images=?, thumbnails=?, isHidden=?, dateTaken=?, meta=? WHERE id=?`;
-        await pool.query(q, [p.title, p.category, p.subCategory, p.weight, p.description, JSON.stringify(p.tags), JSON.stringify(imgs), JSON.stringify(thumbs), p.isHidden, p.dateTaken, JSON.stringify(p.meta), req.params.id]);
+        await pool.query(
+            `UPDATE products SET title=?, category=?, subCategory=?, weight=?, description=?, tags=?, images=?, thumbnails=?, isHidden=?, dateTaken=?, meta=? WHERE id=?`, 
+            [p.title, p.category, p.subCategory, p.weight, p.description, JSON.stringify(p.tags), JSON.stringify(imgs), JSON.stringify(thumbs), p.isHidden, p.dateTaken, JSON.stringify(p.meta), req.params.id]
+        );
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -382,22 +341,28 @@ app.delete('/api/products/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/customers', async (req, res) => {
+// -- CONFIG --
+
+app.get('/api/config', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT * FROM customers ORDER BY createdAt DESC');
-        res.json(rows);
+        if (!pool) throw new Error('DB Offline');
+        const [rows] = await pool.query('SELECT data FROM app_config WHERE id=1');
+        res.json(parseJson(rows[0], ['data'])?.data || {});
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/customers/check/:phone', async (req, res) => {
+app.post('/api/config', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT name, pincode FROM customers WHERE phone=?', [req.params.phone]);
-        res.json({ exists: !!rows[0], user: rows[0] || null });
+        await pool.query('INSERT INTO app_config (id, data) VALUES (1, ?) ON DUPLICATE KEY UPDATE data=?', [JSON.stringify(req.body), JSON.stringify(req.body)]);
+        res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// -- ANALYTICS --
 
 app.get('/api/analytics', async (req, res) => {
     try {
+        if (!pool) throw new Error('DB Offline');
         const [rows] = await pool.query('SELECT * FROM analytics ORDER BY timestamp DESC LIMIT 500');
         res.json(rows.map(r => parseJson(r, ['meta'])));
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -405,26 +370,11 @@ app.get('/api/analytics', async (req, res) => {
 
 app.get('/api/analytics/intelligence', async (req, res) => {
     try {
-        const [spendingRows] = await pool.query(`
-            SELECT c.pincode, AVG(a.weight) as avg_weight_interest, COUNT(*) as interaction_count
-            FROM analytics a JOIN customers c ON a.userId = c.id
-            WHERE a.type IN ('like', 'inquiry', 'screenshot') AND a.weight > 0
-            GROUP BY c.pincode HAVING interaction_count > 2 ORDER BY avg_weight_interest DESC
-        `);
-        const [categoryRows] = await pool.query(`
-            SELECT c.pincode, a.category, COUNT(*) as demand_score
-            FROM analytics a JOIN customers c ON a.userId = c.id
-            WHERE a.type IN ('view', 'like', 'inquiry')
-            GROUP BY c.pincode, a.category ORDER BY c.pincode, demand_score DESC
-        `);
-        const [engagementRows] = await pool.query(`
-            SELECT productTitle, AVG(duration) as avg_time_seconds, SUM(CASE WHEN type = 'screenshot' THEN 1 ELSE 0 END) as screenshot_count
-            FROM analytics WHERE duration > 0 OR type = 'screenshot' GROUP BY productTitle ORDER BY avg_time_seconds DESC LIMIT 20
-        `);
-        const [deviceRows] = await pool.query(`
-            SELECT JSON_UNQUOTE(JSON_EXTRACT(meta, '$.os')) as os, COUNT(DISTINCT userId) as user_count
-            FROM analytics WHERE meta IS NOT NULL GROUP BY os
-        `);
+        if (!pool) throw new Error('DB Offline');
+        const [spendingRows] = await pool.query(`SELECT c.pincode, AVG(a.weight) as avg_weight_interest, COUNT(*) as interaction_count FROM analytics a JOIN customers c ON a.userId = c.id WHERE a.type IN ('like', 'inquiry', 'screenshot') AND a.weight > 0 GROUP BY c.pincode HAVING interaction_count > 2 ORDER BY avg_weight_interest DESC`);
+        const [categoryRows] = await pool.query(`SELECT c.pincode, a.category, COUNT(*) as demand_score FROM analytics a JOIN customers c ON a.userId = c.id WHERE a.type IN ('view', 'like', 'inquiry') GROUP BY c.pincode, a.category ORDER BY c.pincode, demand_score DESC`);
+        const [engagementRows] = await pool.query(`SELECT productTitle, AVG(duration) as avg_time_seconds, SUM(CASE WHEN type = 'screenshot' THEN 1 ELSE 0 END) as screenshot_count FROM analytics WHERE duration > 0 OR type = 'screenshot' GROUP BY productTitle ORDER BY avg_time_seconds DESC LIMIT 20`);
+        const [deviceRows] = await pool.query(`SELECT JSON_UNQUOTE(JSON_EXTRACT(meta, '$.os')) as os, COUNT(DISTINCT userId) as user_count FROM analytics WHERE meta IS NOT NULL GROUP BY os`);
         res.json({ spendingPower: spendingRows, regionalDemand: categoryRows, engagement: engagementRows, devices: deviceRows });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -440,42 +390,81 @@ app.post('/api/analytics', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/stats/:productId', async (req, res) => {
+// -- USERS & AUTH --
+
+app.get('/api/customers', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT type, COUNT(*) as count FROM analytics WHERE productId = ? GROUP BY type', [req.params.productId]);
-        const stats = { like: 0, dislike: 0, inquiry: 0, purchase: 0 };
-        rows.forEach(r => { if (stats.hasOwnProperty(r.type)) stats[r.type] = r.count; if (r.type === 'inquiry') stats.inquiry = r.count; if (r.type === 'sold') stats.purchase = r.count; });
-        res.json(stats);
+        const [rows] = await pool.query('SELECT * FROM customers ORDER BY createdAt DESC');
+        res.json(rows);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/designs', async (req, res) => {
+app.get('/api/customers/check/:phone', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT * FROM designs ORDER BY createdAt DESC');
+        const [rows] = await pool.query('SELECT name, pincode, isVerified, accessExpiresAt FROM customers WHERE phone=?', [req.params.phone]);
+        res.json({ exists: !!rows[0], user: rows[0] || null });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/customers/:id/access', async (req, res) => {
+    try {
+        const { isVerified, accessExpiresAt } = req.body;
+        await pool.query(
+            'UPDATE customers SET isVerified=?, accessExpiresAt=? WHERE id=?', 
+            [isVerified, accessExpiresAt ? new Date(accessExpiresAt) : null, req.params.id]
+        );
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/auth/whatsapp', async (req, res) => {
+    try {
+        const { phone, name, pincode, location } = req.body;
+        const [rows] = await pool.query('SELECT * FROM customers WHERE phone=?', [phone]);
+        let user;
+        if (rows[0]) {
+            user = rows[0];
+            const updates = []; const values = [];
+            if (name) { updates.push('name=?'); values.push(name); user.name = name; }
+            if (pincode) { updates.push('pincode=?'); values.push(pincode); user.pincode = pincode; }
+            if (location) { updates.push('lastLocation=?'); values.push(JSON.stringify(location)); }
+            if (updates.length > 0) { values.push(user.id); await pool.query(`UPDATE customers SET ${updates.join(', ')} WHERE id=?`, values); }
+        } else {
+            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date(), isVerified: false, accessExpiresAt: null };
+            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt, isVerified, accessExpiresAt) VALUES (?,?,?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt, false, null]);
+        }
+        res.json(user);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/auth/staff', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        const [rows] = await pool.query('SELECT * FROM staff WHERE username=? AND password=? AND isActive=1', [username, password]);
+        if (rows[0]) res.json(rows[0]);
+        else res.status(401).json({ error: 'Invalid credentials' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/staff', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT id, username, role, isActive, name, createdAt FROM staff');
         res.json(rows);
     } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// -- MISC --
+
+app.get('/api/designs', async (req, res) => {
+    try { const [rows] = await pool.query('SELECT * FROM designs ORDER BY createdAt DESC'); res.json(rows); } 
+    catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/designs', async (req, res) => {
-    try {
-        const d = req.body;
-        await pool.query('INSERT INTO designs (id, imageUrl, prompt, aspectRatio, createdAt) VALUES (?,?,?,?,?)', [d.id, d.imageUrl, d.prompt, d.aspectRatio, new Date()]);
-        res.json({ success: true });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/suggestions/:productId', async (req, res) => {
-    try {
-        const [rows] = await pool.query('SELECT * FROM suggestions WHERE productId=? ORDER BY createdAt DESC', [req.params.productId]);
-        res.json(rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/suggestions', async (req, res) => {
-    try {
-        const { productId, userId, userName, userPhone, suggestion } = req.body;
-        await pool.query('INSERT INTO suggestions (id, productId, userId, userName, userPhone, suggestion, createdAt) VALUES (?,?,?,?,?,?,?)', [crypto.randomUUID(), productId, userId, userName, userPhone, suggestion, new Date()]);
-        res.json({ success: true });
+    try { 
+        const d = req.body; 
+        await pool.query('INSERT INTO designs (id, imageUrl, prompt, aspectRatio, createdAt) VALUES (?,?,?,?,?)', [d.id, d.imageUrl, d.prompt, d.aspectRatio, new Date()]); 
+        res.json({ success: true }); 
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -504,56 +493,59 @@ app.get('/api/shared-links/:token', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/config', async (req, res) => {
+// -- ORDER MGMT --
+
+app.get('/api/orders', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT data FROM app_config WHERE id=1');
-        res.json(parseJson(rows[0], ['data'])?.data || {});
+        const [rows] = await pool.query('SELECT * FROM orders ORDER BY createdAt DESC');
+        res.json(rows.map(r => parseJson(r, ['items', 'deliveryDetails'])));
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/config', async (req, res) => {
+app.post('/api/orders', async (req, res) => {
     try {
-        await pool.query('INSERT INTO app_config (id, data) VALUES (1, ?) ON DUPLICATE KEY UPDATE data=?', [JSON.stringify(req.body), JSON.stringify(req.body)]);
+        const o = req.body;
+        const id = crypto.randomUUID();
+        const now = new Date();
+        await pool.query('INSERT INTO orders (id, customerId, customerName, customerPhone, items, totalItems, totalWeight, status, deliveryDetails, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', 
+            [id, o.customerId, o.customerName, o.customerPhone, JSON.stringify(o.items), o.totalItems, o.totalWeight, 'pending', JSON.stringify({}), now, now]);
+        res.json({ success: true, orderId: id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/orders/:id/status', async (req, res) => {
+    try {
+        const { status, deliveryDetails } = req.body;
+        const now = new Date();
+        await pool.query('UPDATE orders SET status=?, deliveryDetails=?, updatedAt=? WHERE id=?', [status, JSON.stringify(deliveryDetails || {}), now, req.params.id]);
+        
+        if (status === 'confirmed') {
+            const [rows] = await pool.query('SELECT items, customerName, customerId FROM orders WHERE id=?', [req.params.id]);
+            if (rows[0]) {
+                const order = parseJson(rows[0], ['items']);
+                if (order.items && Array.isArray(order.items)) {
+                    for (const item of order.items) {
+                        const pid = item.product.id;
+                        const [pRows] = await pool.query('SELECT meta FROM products WHERE id=?', [pid]);
+                        if (pRows[0]) {
+                            let meta = typeof pRows[0].meta === 'string' ? JSON.parse(pRows[0].meta) : pRows[0].meta;
+                            if (!meta) meta = {};
+                            meta.soldTo = `${order.customerName} (${order.customerId})`;
+                            meta.soldDate = now.toISOString();
+                            meta.orderId = req.params.id;
+                            await pool.query('UPDATE products SET isHidden=TRUE, meta=? WHERE id=?', [JSON.stringify(meta), pid]);
+                            await pool.query('INSERT INTO analytics (id, type, productId, productTitle, category, weight, userId, userName, timestamp, duration, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?)', 
+                                [crypto.randomUUID(), 'sold', pid, item.product.title, item.product.category, item.product.weight, order.customerId, order.customerName, now, 0, JSON.stringify(meta)]);
+                        }
+                    }
+                }
+            }
+        }
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/auth/staff', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const [rows] = await pool.query('SELECT * FROM staff WHERE username=? AND password=? AND isActive=1', [username, password]);
-        if (rows[0]) res.json(rows[0]);
-        else res.status(401).json({ error: 'Invalid credentials' });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/staff', async (req, res) => {
-    try {
-        const [rows] = await pool.query('SELECT id, username, role, isActive, name, createdAt FROM staff');
-        res.json(rows);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/auth/whatsapp', async (req, res) => {
-    try {
-        const { phone, name, pincode, location } = req.body;
-        const [rows] = await pool.query('SELECT * FROM customers WHERE phone=?', [phone]);
-        let user;
-        if (rows[0]) {
-            user = rows[0];
-            const updates = []; const values = [];
-            if (name) { updates.push('name=?'); values.push(name); user.name = name; }
-            if (pincode) { updates.push('pincode=?'); values.push(pincode); user.pincode = pincode; }
-            if (location) { updates.push('lastLocation=?'); values.push(JSON.stringify(location)); }
-            if (updates.length > 0) { values.push(user.id); await pool.query(`UPDATE customers SET ${updates.join(', ')} WHERE id=?`, values); }
-        } else {
-            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date() };
-            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt) VALUES (?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt]);
-        }
-        res.json(user);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
+// Final Static Serve Catch-All
 const dist = path.resolve(process.cwd(), 'dist');
 if (existsSync(dist)) {
     app.use(express.static(dist, { index: false }));

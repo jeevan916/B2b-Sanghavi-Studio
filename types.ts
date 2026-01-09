@@ -19,6 +19,9 @@ export type Product = {
     cameraModel?: string;
     deviceManufacturer?: string;
     location?: string;
+    soldTo?: string; // ID of the buyer
+    soldDate?: string;
+    orderId?: string;
   };
 };
 
@@ -39,6 +42,8 @@ export type User = {
   pincode?: string;
   lastLogin?: string;
   createdAt?: string;
+  isVerified?: boolean;       // B2B Approval Status
+  accessExpiresAt?: string;   // Date when catalog access is revoked
 };
 
 export interface StaffAccount {
@@ -137,4 +142,33 @@ export interface QueueItem {
   manufacturer?: string;
   productTitle?: string;
   error?: string;
+}
+
+// --- ORDER MANAGEMENT TYPES ---
+
+export type OrderStatus = 'pending' | 'confirmed' | 'dispatched' | 'cancelled';
+
+export type DeliveryMode = 'hand_to_hand' | 'vpp' | 'logistics';
+
+export interface DeliveryDetails {
+  mode: DeliveryMode;
+  courierName?: string;
+  trackingNumber?: string;
+  dispatchedBy?: string; // Staff name
+  dispatchedAt?: string;
+  notes?: string;
+}
+
+export interface Order {
+  id: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  items: CartItem[]; // Snapshot of items at time of order
+  totalItems: number;
+  totalWeight: number;
+  status: OrderStatus;
+  deliveryDetails?: DeliveryDetails;
+  createdAt: string;
+  updatedAt: string;
 }

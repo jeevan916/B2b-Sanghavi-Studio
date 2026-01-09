@@ -1,8 +1,9 @@
+
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { ProductCard } from '../components/ProductCard';
 import { storeService, CuratedCollections } from '../services/storeService';
-import { Search, Grid, LayoutGrid, LogOut, Loader2, Filter, Sparkles, TrendingUp, Clock, Heart, Gem, Unlock } from 'lucide-react';
+import { Search, Grid, LayoutGrid, LogOut, Loader2, Filter, Sparkles, TrendingUp, Clock, Heart, Gem, Unlock, Lock, ShieldAlert, History } from 'lucide-react';
 import { Product, AnalyticsEvent, AppConfig } from '../types';
 
 const CuratedSection: React.FC<{ title: string, products: Product[], icon: React.ElementType, accent: string, onProductClick: (id: string) => void }> = ({ title, products, icon: Icon, accent, onProductClick }) => {
@@ -26,6 +27,19 @@ const CuratedSection: React.FC<{ title: string, products: Product[], icon: React
 export const Gallery: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // Access Control State
+  const user = storeService.getCurrentUser();
+  const isAdmin = user?.role === 'admin' || user?.role === 'contributor';
+  const isGuest = !user;
+  const isVerified = user?.isVerified;
+  const isExpired = user?.accessExpiresAt && new Date(user.accessExpiresAt) < new Date();
+
+  // Redirect Guests immediately
+  if (isGuest) {
+      return <Navigate to="/login" replace />;
+  }
+
   const [products, setProducts] = useState<Product[]>([]);
   const [curated, setCurated] = useState<CuratedCollections>({ latest: [], loved: [], trending: [], ideal: [] });
   const [analytics, setAnalytics] = useState<AnalyticsEvent[]>([]);
@@ -56,10 +70,6 @@ export const Gallery: React.FC = () => {
     if (node) observer.current.observe(node);
   }, [isLoading, hasMore]);
 
-  const user = storeService.getCurrentUser();
-  const isAdmin = user?.role === 'admin' || user?.role === 'contributor';
-  const isGuest = !user;
-
   const sharedCategoryState = (location.state as any)?.sharedCategory;
   const unlockedCategories = storeService.getUnlockedCategories();
 
@@ -71,13 +81,13 @@ export const Gallery: React.FC = () => {
       Promise.all([
           storeService.getConfig(),
           storeService.getAnalytics(),
-          storeService.getCuratedProducts()
+          !isExpired && isVerified ? storeService.getCuratedProducts() : Promise.resolve({ latest: [], loved: [], trending: [], ideal: [] })
       ]).then(([conf, ana, cur]) => {
           setConfig(conf);
           setAnalytics(ana);
           setCurated(cur);
       });
-  }, []);
+  }, [isExpired, isVerified]);
 
   useEffect(() => {
       setPage(1);
@@ -90,8 +100,24 @@ export const Gallery: React.FC = () => {
     const fetchProducts = async () => {
         setIsLoading(true);
         try {
+            // Access Control Logic
+            if (!isAdmin) {
+                if (!isVerified) {
+                    setProducts([]); setHasMore(false); setIsLoading(false); setIsInitialLoad(false); return;
+                }
+                if (isExpired) {
+                    if (requestId !== requestRef.current) return;
+                    const purchased = await storeService.getPurchasedProducts(user.id);
+                    setProducts(purchased);
+                    setHasMore(false);
+                    setIsLoading(false);
+                    setIsInitialLoad(false);
+                    return;
+                }
+            }
+
             const filters = {
-                publicOnly: isGuest, 
+                publicOnly: false, 
                 category: activeCategory !== 'All' ? activeCategory : undefined,
                 subCategory: activeSubCategory !== 'All' ? activeSubCategory : undefined,
                 search: search || undefined
@@ -118,13 +144,12 @@ export const Gallery: React.FC = () => {
     };
     const timeout = setTimeout(fetchProducts, 300);
     return () => clearTimeout(timeout);
-  }, [page, activeCategory, activeSubCategory, search, isGuest]);
+  }, [page, activeCategory, activeSubCategory, search, isVerified, isExpired, isAdmin]);
 
   const categoryList = useMemo(() => {
     if (!config?.categories) return ['All'];
     const visibleCats = config.categories
         .filter(c => {
-             // Strictly hide private categories for guests unless explicitly unlocked via private link
              const isUnlocked = unlockedCategories.includes(c.name) || (sharedCategoryState === c.name);
              if (c.isPrivate) return isAdmin || isUnlocked;
              return true;
@@ -135,10 +160,7 @@ export const Gallery: React.FC = () => {
 
   const navigateToProduct = (productId: string) => {
       if (navigator.vibrate) navigator.vibrate(10);
-      
-      // BUILD CONTEXT: Pass the list of loaded product IDs to allow swiping next/prev in Details
       const contextIds = products.map(p => p.id);
-      
       navigate(`/product/${productId}`, { 
           state: { 
               sharedCategory: sharedCategoryState,
@@ -152,6 +174,79 @@ export const Gallery: React.FC = () => {
       return { live: liveViewers, total: products.length };
   }, [products]);
 
+  // --- ACCESS CONTROL STATES ---
+
+  // 1. Pending Approval
+  if (!isAdmin && !isVerified) {
+      return (
+          <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-6 text-center">
+              <div className="bg-white p-8 rounded-3xl shadow-xl border border-stone-200 max-w-sm animate-in zoom-in-95">
+                  <div className="w-16 h-16 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Lock size={32} />
+                  </div>
+                  <h2 className="font-serif text-2xl text-stone-800 font-bold mb-2">Access Pending</h2>
+                  <p className="text-stone-500 text-sm mb-6">
+                      Your B2B account is under review by the Sanghavi administration team. You will be notified once access is granted.
+                  </p>
+                  <button onClick={() => storeService.logout()} className="text-xs font-bold uppercase tracking-widest text-stone-400 hover:text-red-500">
+                      Logout
+                  </button>
+              </div>
+          </div>
+      );
+  }
+
+  // 2. Access Expired (Digital Vault View)
+  if (!isAdmin && isExpired) {
+      return (
+          <div className="min-h-screen bg-stone-900 pb-20 pt-8 animate-in fade-in duration-700">
+              <div className="max-w-7xl mx-auto px-4">
+                  <div className="flex justify-between items-center mb-8">
+                      <div>
+                          <h1 className="font-serif text-3xl text-gold-500">Digital Vault</h1>
+                          <p className="text-stone-400 text-sm mt-1">Access to general catalog has expired. Viewing purchased assets only.</p>
+                      </div>
+                      <button onClick={() => storeService.logout()} className="text-stone-500 hover:text-white"><LogOut size={20} /></button>
+                  </div>
+
+                  <div className="bg-stone-800/50 p-6 rounded-2xl border border-stone-700 mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                          <ShieldAlert className="text-red-400" size={24} />
+                          <div>
+                              <p className="text-white font-bold">Catalog Access Locked</p>
+                              <p className="text-xs text-stone-400">Validity period ended on {new Date(user!.accessExpiresAt!).toLocaleDateString()}.</p>
+                          </div>
+                      </div>
+                      <button 
+                        onClick={() => storeService.requestRenewal()}
+                        className="px-6 py-2 bg-gold-600 text-white rounded-lg font-bold uppercase text-xs tracking-widest hover:bg-gold-700 transition shadow-lg shadow-gold-900/20"
+                      >
+                          Request Renewal
+                      </button>
+                  </div>
+
+                  <h3 className="font-serif text-xl text-white mb-6 flex items-center gap-2"><History size={20}/> My Collection</h3>
+                  
+                  {products.length === 0 ? (
+                      <div className="text-center py-20 text-stone-600">
+                          <Lock size={48} className="mx-auto mb-4 opacity-50" />
+                          <p>No digital assets found in your vault.</p>
+                      </div>
+                  ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {products.map(product => (
+                              <div key={product.id} className="opacity-80 hover:opacity-100 transition-opacity">
+                                  <ProductCard product={product} isAdmin={false} onClick={() => navigateToProduct(product.id)} />
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+          </div>
+      );
+  }
+
+  // 3. Loading State
   if (isInitialLoad && products.length === 0) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-stone-50">
@@ -165,17 +260,15 @@ export const Gallery: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-stone-50 pb-20 md:pt-16 animate-in fade-in duration-700">
-      {!isGuest && (
-          <div className="bg-stone-900 text-gold-500 text-[10px] font-bold uppercase tracking-widest py-1.5 px-4 flex items-center justify-between z-50">
-             <div className="flex items-center gap-2 animate-pulse">
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div> Live Studio Pulse
-             </div>
-             <div className="flex items-center gap-4">
-                <span className="text-white hidden sm:inline">Active Sessions: {trendingStats.live}</span>
-                <span className="text-gold-300">New arrivals logged</span>
-             </div>
-          </div>
-      )}
+      <div className="bg-stone-900 text-gold-500 text-[10px] font-bold uppercase tracking-widest py-1.5 px-4 flex items-center justify-between z-50">
+         <div className="flex items-center gap-2 animate-pulse">
+            <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div> Live Studio Pulse
+         </div>
+         <div className="flex items-center gap-4">
+            <span className="text-white hidden sm:inline">Active Sessions: {trendingStats.live}</span>
+            <span className="text-gold-300">New arrivals logged</span>
+         </div>
+      </div>
 
       <div className="sticky top-0 md:top-16 bg-white/90 backdrop-blur-md border-b border-stone-200 z-40">
         <div className="max-w-7xl mx-auto flex flex-col gap-2 p-2">

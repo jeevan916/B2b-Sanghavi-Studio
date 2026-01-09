@@ -1,61 +1,59 @@
 
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Sparkles, ShieldCheck, Gem } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ShieldCheck, Lock, ChevronRight, Gem } from 'lucide-react';
 
 export const Landing: React.FC = () => {
+  const navigate = useNavigate();
+
   return (
-    <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* Background Accents */}
-      <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-gold-100/30 rounded-full blur-[140px] animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-gold-200/20 rounded-full blur-[140px]"></div>
+    <div className="min-h-screen bg-stone-900 text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      {/* Abstract Luxury Background */}
+      <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] bg-gold-600 rounded-full blur-[180px] animate-pulse"></div>
+          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-900 rounded-full blur-[180px]"></div>
+      </div>
       
-      <div className="max-w-3xl w-full text-center space-y-12 relative z-10 animate-in fade-in zoom-in-95 duration-1000">
-        <header className="space-y-6">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold-50 border border-gold-100 text-gold-600 text-[10px] font-bold uppercase tracking-widest mb-4">
-             <Sparkles size={12} /> The New Era of Bespoke Luxury
+      <div className="max-w-md w-full relative z-10 flex flex-col items-center space-y-10 animate-in fade-in zoom-in-95 duration-1000">
+        
+        {/* Branding */}
+        <div className="text-center space-y-4">
+          <div className="w-20 h-20 bg-gradient-to-br from-gold-400 to-gold-700 rounded-2xl mx-auto flex items-center justify-center shadow-2xl shadow-gold-500/20 mb-6">
+             <span className="font-serif text-5xl font-bold text-stone-900">S</span>
           </div>
-          <h1 className="font-serif text-6xl md:text-9xl text-stone-900 font-bold tracking-tight leading-none">Sanghavi</h1>
-          <div className="flex items-center justify-center gap-4">
-            <div className="h-px w-12 bg-gold-400"></div>
-            <p className="font-sans text-[10px] md:text-sm tracking-[0.6em] text-gold-600 uppercase font-bold">Jewel Studio</p>
-            <div className="h-px w-12 bg-gold-400"></div>
-          </div>
-        </header>
-
-        <p className="text-stone-500 text-lg md:text-2xl font-light leading-relaxed max-w-xl mx-auto">
-          Where timeless high-jewelry artistry meets cutting-edge <span className="text-stone-900 font-medium">Generative Intelligence</span>.
-        </p>
-
-        <div className="flex flex-col md:flex-row gap-4 max-w-sm mx-auto">
-          <Link to="/collection" className="flex-1 group relative overflow-hidden bg-stone-900 text-white py-5 rounded-2xl font-bold text-lg shadow-2xl transition-all hover:scale-[1.02] active:scale-[0.98]">
-            <span className="relative z-10 flex items-center justify-center gap-3">
-              Explore Catalog <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-            </span>
-            <div className="absolute inset-0 bg-gradient-to-r from-gold-600 to-gold-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-          </Link>
+          <h1 className="font-serif text-4xl md:text-5xl text-white font-bold tracking-tight">Sanghavi</h1>
+          <p className="text-[10px] uppercase tracking-[0.4em] text-gold-500 font-bold">Bespoke Jewel Studio</p>
         </div>
 
-        <div className="pt-8">
-            <Link to="/login" className="py-2 text-stone-400 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-gold-600 transition-colors border-b border-stone-200 inline-block">
-              Secure Client Portal Access
-            </Link>
+        {/* Portal Entry Card */}
+        <div className="w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+            <div className="flex items-center justify-center gap-2 text-stone-400 mb-6">
+                <Lock size={14} />
+                <span className="text-[10px] uppercase font-bold tracking-widest">Authorized Access Only</span>
+            </div>
+
+            <p className="text-center text-stone-300 font-light leading-relaxed text-sm mb-8">
+                Welcome to the exclusive B2B partner portal. <br/>
+                Access to the digital catalog is restricted to verified registered clientele.
+            </p>
+
+            <button 
+                onClick={() => navigate('/login')}
+                className="w-full py-4 bg-gradient-to-r from-gold-600 to-gold-500 text-white rounded-xl font-bold uppercase tracking-widest flex items-center justify-center gap-3 hover:shadow-lg hover:shadow-gold-500/20 transition-all active:scale-[0.98]"
+            >
+                Enter Secure Portal <ChevronRight size={16} />
+            </button>
+
+            <div className="mt-6 pt-6 border-t border-white/5 flex justify-between items-center text-xs text-stone-500">
+                <span className="flex items-center gap-1"><ShieldCheck size={12}/> 256-bit Encrypted</span>
+                <Link to="/staff" className="hover:text-gold-500 transition-colors">Staff Login</Link>
+            </div>
         </div>
 
-        <footer className="grid grid-cols-3 gap-8 pt-16 border-t border-stone-200/60">
-          <div className="flex flex-col items-center gap-3">
-            <div className="p-3 bg-white rounded-2xl shadow-sm"><Gem size={24} className="text-gold-500" /></div>
-            <span className="text-[10px] uppercase font-bold text-stone-400 tracking-widest">Heritage Quality</span>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="p-3 bg-white rounded-2xl shadow-sm"><Sparkles size={24} className="text-gold-500" /></div>
-            <span className="text-[10px] uppercase font-bold text-stone-400 tracking-widest">AI Visualization</span>
-          </div>
-          <div className="flex flex-col items-center gap-3">
-            <div className="p-3 bg-white rounded-2xl shadow-sm"><ShieldCheck size={24} className="text-gold-500" /></div>
-            <span className="text-[10px] uppercase font-bold text-stone-400 tracking-widest">Global Concierge</span>
-          </div>
-        </footer>
+        {/* Footer Note */}
+        <div className="text-center opacity-40">
+            <p className="text-[9px] uppercase font-bold tracking-widest text-stone-500">Private Trade Platform • v3.5</p>
+        </div>
       </div>
     </div>
   );

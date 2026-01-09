@@ -1,5 +1,5 @@
 
-import { Product, User, GeneratedDesign, AppConfig, SharedLink, AnalyticsEvent, StaffAccount, ProductSuggestion } from "../types";
+import { Product, User, GeneratedDesign, AppConfig, SharedLink, AnalyticsEvent, StaffAccount, ProductSuggestion, Order, OrderStatus, DeliveryDetails, CartItem } from "../types";
 
 const API_BASE = '/api';
 
@@ -184,6 +184,13 @@ export const storeService = {
     }
   },
 
+  getPurchasedProducts: async (userId: string): Promise<Product[]> => {
+      try {
+          const data = await apiFetch(`/products/purchased?userId=${userId}`);
+          return Array.isArray(data) ? data : [];
+      } catch (e) { return []; }
+  },
+
   getCuratedProducts: async (): Promise<CuratedCollections> => {
       try {
           const data = await apiFetch('/products/curated');
@@ -245,6 +252,27 @@ export const storeService = {
 
   checkCustomerExistence: async (phone: string): Promise<{ exists: boolean, user?: any }> => {
      return await apiFetch(`/customers/check/${phone}`);
+  },
+
+  grantAccess: async (userId: string, days: number) => {
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + days);
+      await apiFetch(`/customers/${userId}/access`, { 
+          method: 'PUT', 
+          body: JSON.stringify({ isVerified: true, accessExpiresAt: expiresAt.toISOString() }) 
+      });
+  },
+
+  requestRenewal: async () => {
+      const user = storeService.getCurrentUser();
+      const config = await storeService.getConfig();
+      if (!user || !config.whatsappNumber) return;
+      
+      const adminPhone = config.whatsappNumber.replace(/\D/g, '');
+      const message = `*B2B Access Renewal Request*\n\nUser: ${user.name}\nPhone: ${user.phone}\n\nMy catalog access has expired. Please review my account and renew access validity to continue purchasing.`;
+      
+      const waUrl = `https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank');
   },
 
   loginWithWhatsApp: async (phone: string, name?: string, pincode?: string, location?: any): Promise<User | null> => {
@@ -468,5 +496,24 @@ I'm interested in: ${product.title} (ID: #${product.id.slice(-6).toUpperCase()})
 
   updateStaff: (id: string, updates: Partial<StaffAccount>) => apiFetch(`/staff/${id}`, { method: 'PUT', body: JSON.stringify(updates) }),
 
-  deleteStaff: (id: string) => apiFetch(`/staff/${id}`, { method: 'DELETE' })
+  deleteStaff: (id: string) => apiFetch(`/staff/${id}`, { method: 'DELETE' }),
+
+  // --- ORDER API METHODS ---
+  createOrder: async (order: Partial<Order>): Promise<{ success: boolean, orderId: string }> => {
+      return await apiFetch('/orders', { method: 'POST', body: JSON.stringify(order) });
+  },
+
+  getOrders: async (): Promise<Order[]> => {
+      try {
+          const data = await apiFetch('/orders');
+          return Array.isArray(data) ? data : [];
+      } catch (e) { return []; }
+  },
+
+  updateOrderStatus: async (id: string, status: OrderStatus, deliveryDetails?: DeliveryDetails) => {
+      return await apiFetch(`/orders/${id}/status`, { 
+          method: 'PUT', 
+          body: JSON.stringify({ status, deliveryDetails }) 
+      });
+  }
 };

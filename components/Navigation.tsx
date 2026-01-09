@@ -23,7 +23,6 @@ export const Navigation: React.FC<NavigationProps> = ({ user, onLogout }) => {
   const isStaffRoute = location.pathname.startsWith('/admin') || location.pathname === '/staff';
 
   const customerTabs = [
-    { id: 'landing', path: '/', icon: Home, label: 'Studio' },
     { id: 'gallery', path: '/collection', icon: LayoutGrid, label: 'Catalog' },
   ];
 
@@ -34,12 +33,15 @@ export const Navigation: React.FC<NavigationProps> = ({ user, onLogout }) => {
     { id: 'settings', path: '/admin/settings', icon: Settings, label: 'Prefs' },
   ];
 
-  const activeTabs = isStaff ? [...customerTabs, ...staffTabs] : customerTabs;
+  const activeTabs = isStaff ? [...customerTabs, ...staffTabs] : (user ? customerTabs : []);
 
   const isActive = (path: string) => {
     if (path === '/' && location.pathname !== '/') return false;
     return location.pathname.startsWith(path);
   };
+
+  // Do not show bottom nav if no user is logged in (Landing page mode)
+  if (!user) return null;
 
   return (
     <nav className={`fixed bottom-0 left-0 right-0 z-50 pb-safe md:top-0 md:bottom-auto border-t md:border-t-0 md:border-b transition-colors duration-500 ${
@@ -75,32 +77,19 @@ export const Navigation: React.FC<NavigationProps> = ({ user, onLogout }) => {
           ))}
           
           <div className="md:hidden flex items-center pl-2 ml-2 border-l border-stone-200/20">
-             {user ? (
-                <button onClick={onLogout} className="flex flex-col items-center gap-1 text-red-400">
-                  <LogOut size={20} />
-                  <span className="text-[9px] uppercase font-bold">Exit</span>
-                </button>
-             ) : (
-                <button onClick={() => navigate('/login')} className="flex flex-col items-center gap-1 text-gold-500">
-                  <LogIn size={20} />
-                  <span className="text-[9px] uppercase font-bold">Login</span>
-                </button>
-             )}
+             <button onClick={onLogout} className="flex flex-col items-center gap-1 text-red-400">
+               <LogOut size={20} />
+               <span className="text-[9px] uppercase font-bold">Exit</span>
+             </button>
           </div>
         </div>
 
         {/* Auth Actions (Desktop) */}
         <div className="hidden md:flex items-center gap-4 shrink-0">
           <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'} animate-pulse`} title={isOnline ? 'Online' : 'Offline'} />
-          {user ? (
-            <button onClick={onLogout} className="text-xs uppercase font-bold text-stone-400 hover:text-red-500 transition-colors flex items-center gap-2">
-              <LogOut size={16}/> Logout
-            </button>
-          ) : (
-            <Link to="/login" className="text-xs uppercase font-bold text-stone-400 hover:text-gold-600 transition-colors flex items-center gap-2">
-              <LogIn size={16}/> Login
-            </Link>
-          )}
+          <button onClick={onLogout} className="text-xs uppercase font-bold text-stone-400 hover:text-red-500 transition-colors flex items-center gap-2">
+            <LogOut size={16}/> Logout
+          </button>
         </div>
       </div>
     </nav>
