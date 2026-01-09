@@ -107,6 +107,11 @@ const createTables = async () => {
                 id VARCHAR(255) PRIMARY KEY, customerId VARCHAR(255), customerName VARCHAR(255),
                 customerPhone VARCHAR(255), items JSON, totalItems INT, totalWeight DECIMAL(10,3),
                 status VARCHAR(50), deliveryDetails JSON, createdAt DATETIME, updatedAt DATETIME
+            )`,
+            `CREATE TABLE IF NOT EXISTS custom_orders (
+                id VARCHAR(255) PRIMARY KEY, originalOrderId VARCHAR(255), productId VARCHAR(255),
+                productTitle VARCHAR(255), productImage LONGTEXT, customerName VARCHAR(255),
+                requirements TEXT, deliveryDate DATE, status VARCHAR(50), createdAt DATETIME
             )`
         ];
         for (const query of tables) await pool.query(query);
@@ -244,7 +249,7 @@ app.get('/api/products/purchased', async (req, res) => {
         const { userId } = req.query;
         if (!userId) return res.json([]);
 
-        const [orders] = await pool.query('SELECT items FROM orders WHERE customerId = ? AND status IN ("confirmed", "dispatched")', [userId]);
+        const [orders] = await pool.query('SELECT items FROM orders WHERE customerId = ? AND status IN ("confirmed", "dispatched", "delivered")', [userId]);
         const purchasedProductIds = new Set();
         orders.forEach(row => {
             const orderData = parseJson(row, ['items']);
@@ -528,7 +533,7 @@ app.post('/api/orders', async (req, res) => {
         const id = crypto.randomUUID();
         const now = new Date();
         await pool.query('INSERT INTO orders (id, customerId, customerName, customerPhone, items, totalItems, totalWeight, status, deliveryDetails, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', 
-            [id, o.customerId, o.customerName, o.customerPhone, JSON.stringify(o.items), o.totalItems, o.totalWeight, 'pending', JSON.stringify({}), now, now]);
+            [id, o.customerId, o.customerName, o.customerPhone, JSON.stringify(o.items.map(i => ({...i, status: 'pending'}))), o.totalItems, o.totalWeight, 'pending', JSON.stringify({}), now, now]);
         res.json({ success: true, orderId: id });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -538,29 +543,56 @@ app.put('/api/orders/:id/status', async (req, res) => {
         const { status, deliveryDetails } = req.body;
         const now = new Date();
         await pool.query('UPDATE orders SET status=?, deliveryDetails=?, updatedAt=? WHERE id=?', [status, JSON.stringify(deliveryDetails || {}), now, req.params.id]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Update Item Status in Order
+app.put('/api/orders/:id/items', async (req, res) => {
+    try {
+        const { productId, status, rejectionReason } = req.body;
+        const [rows] = await pool.query('SELECT items FROM orders WHERE id=?', [req.params.id]);
+        if (!rows[0]) return res.status(404).json({error: 'Order not found'});
         
-        if (status === 'confirmed') {
-            const [rows] = await pool.query('SELECT items, customerName, customerId FROM orders WHERE id=?', [req.params.id]);
-            if (rows[0]) {
-                const order = parseJson(rows[0], ['items']);
-                if (order.items && Array.isArray(order.items)) {
-                    for (const item of order.items) {
-                        const pid = item.product.id;
-                        const [pRows] = await pool.query('SELECT meta FROM products WHERE id=?', [pid]);
-                        if (pRows[0]) {
-                            let meta = typeof pRows[0].meta === 'string' ? JSON.parse(pRows[0].meta) : pRows[0].meta;
-                            if (!meta) meta = {};
-                            meta.soldTo = `${order.customerName} (${order.customerId})`;
-                            meta.soldDate = now.toISOString();
-                            meta.orderId = req.params.id;
-                            await pool.query('UPDATE products SET isHidden=TRUE, meta=? WHERE id=?', [JSON.stringify(meta), pid]);
-                            await pool.query('INSERT INTO analytics (id, type, productId, productTitle, category, weight, userId, userName, timestamp, duration, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?)', 
-                                [crypto.randomUUID(), 'sold', pid, item.product.title, item.product.category, item.product.weight, order.customerId, order.customerName, now, 0, JSON.stringify(meta)]);
-                        }
-                    }
-                }
+        let orderData = parseJson(rows[0], ['items']);
+        let items = orderData.items || [];
+        let updated = false;
+
+        items = items.map(item => {
+            if (item.product.id === productId) {
+                updated = true;
+                return { ...item, status, rejectionReason };
             }
+            return item;
+        });
+
+        if (!updated) return res.status(404).json({error: 'Item not found in order'});
+
+        await pool.query('UPDATE orders SET items=?, updatedAt=? WHERE id=?', [JSON.stringify(items), new Date(), req.params.id]);
+
+        // Check if all items are processed (confirmed, rejected, or moved)
+        const allProcessed = items.every(i => ['confirmed', 'rejected', 'moved'].includes(i.status));
+        const allDispatched = items.every(i => ['dispatched', 'rejected', 'moved'].includes(i.status));
+
+        if (allDispatched) {
+             await pool.query('UPDATE orders SET status="delivered" WHERE id=?', [req.params.id]);
+        } else if (allProcessed) {
+             await pool.query('UPDATE orders SET status="confirmed" WHERE id=?', [req.params.id]);
         }
+
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Move to Custom Order
+app.post('/api/custom-orders', async (req, res) => {
+    try {
+        const co = req.body;
+        const id = crypto.randomUUID();
+        await pool.query(
+            `INSERT INTO custom_orders (id, originalOrderId, productId, productTitle, productImage, customerName, requirements, deliveryDate, status, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            [id, co.originalOrderId, co.productId, co.productTitle, co.productImage, co.customerName, co.requirements, co.deliveryDate, 'active', new Date()]
+        );
         res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });

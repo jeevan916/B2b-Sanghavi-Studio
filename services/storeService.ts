@@ -1,5 +1,5 @@
 
-import { Product, User, GeneratedDesign, AppConfig, SharedLink, AnalyticsEvent, StaffAccount, ProductSuggestion, Order, OrderStatus, DeliveryDetails, CartItem } from "../types";
+import { Product, User, GeneratedDesign, AppConfig, SharedLink, AnalyticsEvent, StaffAccount, ProductSuggestion, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus, CustomOrder } from "../types";
 
 const API_BASE = '/api';
 
@@ -521,6 +521,20 @@ I'm interested in: ${product.title} (ID: #${product.id.slice(-6).toUpperCase()})
       return await apiFetch(`/orders/${id}/status`, { 
           method: 'PUT', 
           body: JSON.stringify({ status, deliveryDetails }) 
+      });
+  },
+
+  updateOrderItemStatus: async (orderId: string, productId: string, status: ItemStatus, rejectionReason?: string) => {
+      return await apiFetch(`/orders/${orderId}/items`, {
+          method: 'PUT',
+          body: JSON.stringify({ productId, status, rejectionReason })
+      });
+  },
+
+  moveItemToCustomOrder: async (customOrder: Partial<CustomOrder>) => {
+      return await apiFetch('/custom-orders', {
+          method: 'POST',
+          body: JSON.stringify(customOrder)
       });
   }
 };

@@ -25,10 +25,14 @@ export type Product = {
   };
 };
 
+export type ItemStatus = 'pending' | 'confirmed' | 'rejected' | 'moved' | 'dispatched';
+
 export interface CartItem {
   product: Product;
   quantity: number;
   notes?: string;
+  status?: ItemStatus; // New field for item-level tracking
+  rejectionReason?: string; // Reason if rejected/moved
 }
 
 export type UserRole = 'customer' | 'contributor' | 'admin';
@@ -147,7 +151,7 @@ export interface QueueItem {
 
 // --- ORDER MANAGEMENT TYPES ---
 
-export type OrderStatus = 'pending' | 'confirmed' | 'dispatched' | 'cancelled';
+export type OrderStatus = 'pending' | 'confirmed' | 'dispatched' | 'cancelled' | 'delivered';
 
 export type DeliveryMode = 'hand_to_hand' | 'vpp' | 'logistics';
 
@@ -172,4 +176,17 @@ export interface Order {
   deliveryDetails?: DeliveryDetails;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CustomOrder {
+  id: string;
+  originalOrderId: string;
+  productId: string;
+  productTitle: string;
+  productImage: string;
+  customerName: string;
+  requirements: string;
+  deliveryDate: string;
+  status: 'active' | 'completed';
+  createdAt: string;
 }

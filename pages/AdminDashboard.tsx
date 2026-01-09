@@ -2,11 +2,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { storeService } from '../services/storeService';
-import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails } from '../types';
+import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus } from '../types';
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -34,10 +34,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [editProduct, setEditProduct] = useState<Product | null>(null);
 
   // Order Management State
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null); // For Master-Detail view
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchDetails, setDispatchDetails] = useState<DeliveryDetails>({ mode: 'logistics' });
   const [dispatchLoading, setDispatchLoading] = useState(false);
+  const [isOrderDetailOpen, setIsOrderDetailOpen] = useState(false);
+
+  // Item Discard State
+  const [itemToDiscard, setItemToDiscard] = useState<CartItem | null>(null);
+  const [discardReason, setDiscardReason] = useState('');
+  const [customOrderSpecs, setCustomOrderSpecs] = useState('');
+  const [customOrderDate, setCustomOrderDate] = useState('');
 
   // Customer Management State
   const [showAccessModal, setShowAccessModal] = useState(false);
@@ -54,7 +61,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         setHealthInfo(h);
         
         if (h.healthy) {
-            // Admin fetches ALL products (publicOnly: false)
             const [p, a, c, o, intel] = await Promise.all([
               storeService.getProducts(1, 1000, { publicOnly: false }).then(res => res.items), 
               storeService.getAnalytics(),
@@ -67,6 +73,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             setCustomers(c);
             setOrders(o);
             setIntelligence(intel);
+            
+            // If viewing specific order, refresh it
+            if (selectedOrder) {
+                const updated = o.find(ord => ord.id === selectedOrder.id);
+                if (updated) setSelectedOrder(updated);
+            }
         }
     } catch (e) {
         console.error("Dashboard Sync Failed", e);
@@ -99,47 +111,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
   const recentInquiries = useMemo(() => analytics.filter(e => e.type === 'inquiry').slice(0, 10), [analytics]);
 
-  const trendingProducts = useMemo(() => {
-      const scores: Record<string, number> = {};
-      analytics.forEach(e => {
-          if (!e.productId) return;
-          if (!scores[e.productId]) scores[e.productId] = 0;
-          
-          if (e.type === 'inquiry') scores[e.productId] += 10;
-          if (e.type === 'like') scores[e.productId] += 5;
-          if (e.type === 'view') scores[e.productId] += 1;
-          if (e.type === 'dislike') scores[e.productId] -= 3;
-      });
-
-      return Object.entries(scores)
-          .sort(([,scoreA], [,scoreB]) => scoreB - scoreA)
-          .slice(0, 10)
-          .map(([id, score]) => {
-              const product = products.find(p => p.id === id);
-              return product ? { ...product, score } : null;
-          })
-          .filter(Boolean) as (Product & { score: number })[];
-  }, [analytics, products]);
-
-  const handleSelect = (id: string, multi: boolean) => {
-      if (multi) {
-          const newSet = new Set(selectedIds);
-          if (newSet.has(id)) newSet.delete(id);
-          else newSet.add(id);
-          setSelectedIds(newSet);
-      } else {
-          setSelectedIds(new Set([id]));
-      }
-  };
-
-  const handleSaveEdit = async () => {
-      if (editProduct) {
-          await storeService.updateProduct(editProduct);
-          setEditProduct(null);
-          refreshData(true);
-      }
-  };
-
   const handleGrantAccess = async () => {
       if (!selectedCustomer) return;
       await storeService.grantAccess(selectedCustomer.id, accessDuration);
@@ -169,13 +140,130 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       setShowEditCustomerModal(true);
   };
 
-  // --- Order Actions ---
+  // --- Order Item Actions ---
+
+  const handleConfirmItem = async (item: CartItem) => {
+      if (!selectedOrder) return;
+      await storeService.updateOrderItemStatus(selectedOrder.id, item.product.id, 'confirmed');
+      refreshData(true);
+  };
+
+  const handleDiscardItem = async () => {
+      if (!selectedOrder || !itemToDiscard || !discardReason) return;
+      
+      const isMoved = discardReason === 'Placed Order as per Requirement';
+      
+      // Update Status in Main Order
+      await storeService.updateOrderItemStatus(
+          selectedOrder.id, 
+          itemToDiscard.product.id, 
+          isMoved ? 'moved' : 'rejected', 
+          discardReason
+      );
+
+      // If moved, create Custom Order entry and Print PDF
+      if (isMoved) {
+          await storeService.moveItemToCustomOrder({
+              originalOrderId: selectedOrder.id,
+              productId: itemToDiscard.product.id,
+              productTitle: itemToDiscard.product.title,
+              productImage: itemToDiscard.product.images[0],
+              customerName: selectedOrder.customerName,
+              requirements: customOrderSpecs,
+              deliveryDate: customOrderDate || new Date().toISOString().split('T')[0]
+          });
+          
+          printCustomOrderJobSheet(itemToDiscard, customOrderSpecs, customOrderDate, selectedOrder.customerName);
+      }
+
+      setItemToDiscard(null);
+      setDiscardReason('');
+      setCustomOrderSpecs('');
+      setCustomOrderDate('');
+      refreshData(true);
+  };
+
+  const printCustomOrderJobSheet = (item: CartItem, specs: string, date: string, customer: string) => {
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) return;
+
+      const html = `
+        <html>
+        <head>
+            <title>Custom Job Sheet - ${item.product.title}</title>
+            <style>
+                body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #333; }
+                .header { text-align: center; border-bottom: 2px solid #b0773f; padding-bottom: 20px; margin-bottom: 40px; }
+                .logo { font-size: 24px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
+                .meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-size: 14px; }
+                .content { display: flex; gap: 40px; }
+                .image { width: 40%; }
+                .image img { width: 100%; border: 1px solid #eee; border-radius: 8px; }
+                .details { flex: 1; }
+                .label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #888; margin-bottom: 4px; }
+                .value { font-size: 16px; margin-bottom: 20px; font-weight: 500; }
+                .specs { background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #eee; }
+                .footer { margin-top: 60px; font-size: 10px; color: #aaa; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
+                @media print { body { padding: 20px; } button { display: none; } }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="logo">Sanghavi Jewel Studio</div>
+                <div>Bespoke Order Worksheet</div>
+            </div>
+            <div class="meta">
+                <div>
+                    <div class="label">Customer</div>
+                    <div class="value">${customer}</div>
+                </div>
+                <div>
+                    <div class="label">Order Ref</div>
+                    <div class="value">#${item.product.id.slice(-6).toUpperCase()}</div>
+                </div>
+                <div>
+                    <div class="label">Due Date</div>
+                    <div class="value">${date}</div>
+                </div>
+            </div>
+            <div class="content">
+                <div class="image">
+                    <img src="${item.product.images[0]}" />
+                </div>
+                <div class="details">
+                    <div class="label">Base Design</div>
+                    <div class="value">${item.product.title}</div>
+                    
+                    <div class="label">Category</div>
+                    <div class="value">${item.product.category} / ${item.product.subCategory}</div>
+
+                    <div class="label">Approx Weight</div>
+                    <div class="value">${item.product.weight}g</div>
+
+                    <div class="specs">
+                        <div class="label">Custom Requirements</div>
+                        <p>${specs.replace(/\n/g, '<br/>')}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="footer">Generated on ${new Date().toLocaleString()} • Sanghavi Admin System</div>
+            <script>window.print();</script>
+        </body>
+        </html>
+      `;
+      
+      printWindow.document.write(html);
+      printWindow.document.close();
+  };
+
+  // --- Order Global Actions ---
   const updateOrderStatus = async (orderId: string, status: OrderStatus, details?: DeliveryDetails) => {
       setDispatchLoading(true);
       try {
           await storeService.updateOrderStatus(orderId, status, details);
-          await refreshData(true); // Refresh to show updated status/hidden products
+          await refreshData(true); 
           setShowDispatchModal(false);
+          setIsOrderDetailOpen(false); // Return to list view on complete dispatch
       } catch (e) {
           alert('Failed to update order status');
       } finally {
@@ -183,12 +271,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       }
   };
 
-  const getStatusColor = (status: OrderStatus) => {
+  const getStatusColor = (status: OrderStatus | ItemStatus | undefined) => {
       switch(status) {
           case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
           case 'confirmed': return 'bg-blue-100 text-blue-800 border-blue-200';
           case 'dispatched': return 'bg-green-100 text-green-800 border-green-200';
-          case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
+          case 'delivered': return 'bg-teal-100 text-teal-800 border-teal-200';
+          case 'cancelled': 
+          case 'rejected': return 'bg-red-100 text-red-800 border-red-200';
+          case 'moved': return 'bg-purple-100 text-purple-800 border-purple-200';
           default: return 'bg-stone-100 text-stone-800';
       }
   };
@@ -234,7 +325,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             ].map(tab => (
               <button 
                 key={tab.id}
-                onClick={() => setActiveView(tab.id as ViewMode)}
+                onClick={() => { setActiveView(tab.id as ViewMode); setIsOrderDetailOpen(false); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${activeView === tab.id ? 'bg-white shadow text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}
               >
                   <tab.icon size={16} /> {tab.label}
@@ -280,7 +371,138 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </div>
       )}
 
-      {/* LEADS VIEW */}
+      {/* ORDERS VIEW */}
+      {activeView === 'orders' && (
+          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
+              {isOrderDetailOpen && selectedOrder ? (
+                  // ORDER DETAIL VIEW
+                  <div className="flex flex-col h-full">
+                      <div className="p-6 bg-stone-50 border-b border-stone-200 flex justify-between items-start">
+                          <div>
+                              <button onClick={() => setIsOrderDetailOpen(false)} className="flex items-center gap-2 text-stone-500 hover:text-stone-900 mb-2 text-xs font-bold uppercase tracking-widest">
+                                  <ArrowLeft size={16} /> Back to List
+                              </button>
+                              <h3 className="font-serif text-2xl text-stone-800 font-bold flex items-center gap-3">
+                                  Order #{selectedOrder.id.slice(0,8).toUpperCase()}
+                                  <span className={`px-3 py-1 rounded-full text-xs border font-sans ${getStatusColor(selectedOrder.status)}`}>{selectedOrder.status}</span>
+                              </h3>
+                              <p className="text-stone-500 text-sm mt-1">{selectedOrder.customerName} • +{selectedOrder.customerPhone} • {new Date(selectedOrder.createdAt).toLocaleString()}</p>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                              {selectedOrder.status !== 'dispatched' && selectedOrder.status !== 'delivered' && (
+                                  <button onClick={() => setShowDispatchModal(true)} className="bg-stone-900 text-white px-6 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition shadow-lg">
+                                      <Truck size={18} /> Dispatch Order
+                                  </button>
+                              )}
+                          </div>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto p-6">
+                          <div className="grid grid-cols-1 gap-4">
+                              {selectedOrder.items.map((item, idx) => (
+                                  <div key={idx} className="flex gap-4 p-4 border border-stone-100 rounded-xl hover:shadow-md transition-shadow bg-white">
+                                      <div className="w-24 h-24 bg-stone-100 rounded-lg overflow-hidden shrink-0">
+                                          <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-full h-full object-cover" />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                          <div className="flex justify-between items-start">
+                                              <div>
+                                                  <h4 className="font-bold text-stone-800 text-lg">{item.product.title}</h4>
+                                                  <p className="text-xs text-stone-500 font-mono">#{item.product.id.slice(-6).toUpperCase()}</p>
+                                              </div>
+                                              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
+                                                  {item.status || 'Pending'}
+                                              </span>
+                                          </div>
+                                          
+                                          <div className="flex gap-6 mt-2 text-sm text-stone-600">
+                                              <span>Qty: <b>{item.quantity}</b></span>
+                                              <span>Weight: <b>{item.product.weight}g</b></span>
+                                              {item.notes && <span className="bg-yellow-50 px-2 rounded text-yellow-700 border border-yellow-100">Note: {item.notes}</span>}
+                                          </div>
+
+                                          {item.rejectionReason && (
+                                              <p className="mt-2 text-xs text-red-500 font-bold bg-red-50 p-2 rounded">Reason: {item.rejectionReason}</p>
+                                          )}
+                                      </div>
+
+                                      <div className="flex flex-col gap-2 justify-center border-l border-stone-100 pl-4">
+                                          {(!item.status || item.status === 'pending') && (
+                                              <>
+                                                  <button onClick={() => handleConfirmItem(item)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Confirm Item">
+                                                      <CheckCircle size={20} />
+                                                  </button>
+                                                  <button onClick={() => setItemToDiscard(item)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" title="Discard/Reject">
+                                                      <X size={20} />
+                                                  </button>
+                                              </>
+                                          )}
+                                          {item.status === 'moved' && (
+                                              <button onClick={() => {}} className="p-2 bg-purple-50 text-purple-600 rounded-lg" title="Moved to Custom Order" disabled>
+                                                  <FileText size={20} />
+                                              </button>
+                                          )}
+                                      </div>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  </div>
+              ) : (
+                  // ORDER LIST VIEW
+                  <>
+                    <div className="p-6 bg-stone-50 border-b border-stone-200 flex justify-between items-center">
+                        <div>
+                            <h3 className="font-serif text-2xl text-stone-800 flex items-center gap-2"><Package className="text-gold-600" /> Order Management</h3>
+                            <p className="text-stone-500 text-sm mt-1">Track, confirm, and dispatch B2B orders.</p>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-stone-50 text-stone-500 uppercase text-[10px] font-bold tracking-[0.2em] border-b border-stone-200">
+                                <tr>
+                                    <th className="p-4">ID & Date</th>
+                                    <th className="p-4">Customer</th>
+                                    <th className="p-4">Summary</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-stone-100">
+                                {orders.map(order => (
+                                    <tr key={order.id} className="hover:bg-stone-50 transition-colors cursor-pointer" onClick={() => { setSelectedOrder(order); setIsOrderDetailOpen(true); }}>
+                                        <td className="p-4">
+                                            <p className="font-mono font-bold text-stone-700">#{order.id.slice(0,6)}</p>
+                                            <p className="text-xs text-stone-400">{new Date(order.createdAt).toLocaleDateString()}</p>
+                                        </td>
+                                        <td className="p-4">
+                                            <p className="font-bold text-stone-800">{order.customerName}</p>
+                                            <p className="text-xs text-stone-500">{order.customerPhone}</p>
+                                        </td>
+                                        <td className="p-4">
+                                            <p className="text-stone-800 font-medium">{order.totalItems} Items</p>
+                                            <p className="text-xs text-stone-500">{order.totalWeight}g Total</p>
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(order.status)}`}>
+                                                {order.status}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <button className="text-gold-600 font-bold text-xs uppercase tracking-wider hover:underline">View Details</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                  </>
+              )}
+          </div>
+      )}
+
+      {/* LEADS VIEW - kept as is */}
       {activeView === 'leads' && (
           <div className="flex-1 bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
               <div className="p-6 bg-stone-50 border-b border-stone-200">
@@ -348,83 +570,70 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </div>
       )}
 
-      {/* Other Views (Orders, Files, Trends, Intel) - kept as is */}
-      {activeView === 'orders' && (
-          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
-              <div className="p-6 bg-stone-50 border-b border-stone-200 flex justify-between items-center">
-                  <div>
-                    <h3 className="font-serif text-2xl text-stone-800 flex items-center gap-2"><Package className="text-gold-600" /> Order Management</h3>
-                    <p className="text-stone-500 text-sm mt-1">Track, confirm, and dispatch B2B orders.</p>
+      {/* Discard Item Modal */}
+      {itemToDiscard && (
+          <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-in zoom-in-95">
+                  <div className="p-6 bg-red-50 border-b border-red-100">
+                      <h3 className="font-serif text-xl font-bold text-red-800">Reject Item</h3>
+                      <p className="text-xs text-red-500 mt-1">Select reason for discarding this item.</p>
                   </div>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-stone-50 text-stone-500 uppercase text-[10px] font-bold tracking-[0.2em] border-b border-stone-200">
-                          <tr>
-                              <th className="p-4">ID & Date</th>
-                              <th className="p-4">Customer</th>
-                              <th className="p-4">Items / Weight</th>
-                              <th className="p-4">Status</th>
-                              <th className="p-4">Delivery</th>
-                              <th className="p-4 text-right">Actions</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-100">
-                          {orders.map(order => (
-                              <tr key={order.id} className="hover:bg-stone-50 transition-colors">
-                                  <td className="p-4">
-                                      <p className="font-mono font-bold text-stone-700">#{order.id.slice(0,6)}</p>
-                                      <p className="text-xs text-stone-400">{new Date(order.createdAt).toLocaleDateString()}</p>
-                                  </td>
-                                  <td className="p-4">
-                                      <p className="font-bold text-stone-800">{order.customerName}</p>
-                                      <p className="text-xs text-stone-500">{order.customerPhone}</p>
-                                  </td>
-                                  <td className="p-4">
-                                      <p className="text-stone-800 font-medium">{order.totalItems} Units</p>
-                                      <p className="text-xs text-stone-500">{order.totalWeight}g</p>
-                                  </td>
-                                  <td className="p-4">
-                                      <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(order.status)}`}>
-                                          {order.status}
-                                      </span>
-                                  </td>
-                                  <td className="p-4 text-xs">
-                                      {order.deliveryDetails?.mode ? (
-                                          <div>
-                                              <p className="font-bold capitalize">{order.deliveryDetails.mode.replace(/_/g, ' ')}</p>
-                                              {order.deliveryDetails.trackingNumber && <p className="font-mono">{order.deliveryDetails.trackingNumber}</p>}
-                                          </div>
-                                      ) : <span className="text-stone-300">-</span>}
-                                  </td>
-                                  <td className="p-4 text-right">
-                                      <div className="flex justify-end gap-2">
-                                          {order.status === 'pending' && (
-                                              <button onClick={() => updateOrderStatus(order.id, 'confirmed')} className="bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 text-xs font-bold transition">
-                                                  Confirm
-                                              </button>
-                                          )}
-                                          {order.status === 'confirmed' && (
-                                              <button onClick={() => { setSelectedOrder(order); setShowDispatchModal(true); }} className="bg-gold-100 text-gold-700 px-3 py-1 rounded hover:bg-gold-200 text-xs font-bold transition">
-                                                  Dispatch
-                                              </button>
-                                          )}
-                                          {(order.status === 'dispatched' || order.status === 'cancelled') && (
-                                              <button disabled className="text-stone-400 text-xs flex items-center gap-1 cursor-not-allowed">
-                                                  <Archive size={14}/> Archived
-                                              </button>
-                                          )}
-                                      </div>
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
+                  <div className="p-6 space-y-4">
+                      {['Not Available', 'Order Specifications Rejected', 'Placed Order as per Requirement'].map(reason => (
+                          <label key={reason} className="flex items-center gap-3 p-3 border border-stone-200 rounded-xl cursor-pointer hover:bg-stone-50 transition">
+                              <input 
+                                  type="radio" 
+                                  name="discardReason" 
+                                  checked={discardReason === reason} 
+                                  onChange={() => setDiscardReason(reason)}
+                                  className="accent-red-600 w-4 h-4"
+                              />
+                              <span className="text-sm font-medium text-stone-700">{reason}</span>
+                          </label>
+                      ))}
+
+                      {discardReason === 'Placed Order as per Requirement' && (
+                          <div className="space-y-3 animate-in fade-in slide-in-from-top-2 pt-2">
+                              <div>
+                                  <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Custom Specs</label>
+                                  <textarea 
+                                      value={customOrderSpecs} 
+                                      onChange={e => setCustomOrderSpecs(e.target.value)}
+                                      className="w-full p-2 border border-stone-200 rounded-lg text-sm h-20"
+                                      placeholder="Enter requirements..."
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Delivery Date</label>
+                                  <input 
+                                      type="date"
+                                      value={customOrderDate}
+                                      onChange={e => setCustomOrderDate(e.target.value)}
+                                      className="w-full p-2 border border-stone-200 rounded-lg text-sm"
+                                  />
+                              </div>
+                              <div className="p-3 bg-blue-50 text-blue-700 text-xs rounded-lg border border-blue-100 flex items-center gap-2">
+                                  <Printer size={16} /> 
+                                  <span>Job Sheet PDF will generate automatically.</span>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
+                      <button onClick={() => setItemToDiscard(null)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
+                      <button 
+                          onClick={handleDiscardItem}
+                          disabled={!discardReason || (discardReason === 'Placed Order as per Requirement' && (!customOrderSpecs || !customOrderDate))} 
+                          className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-700 transition disabled:opacity-50"
+                      >
+                          Confirm Rejection
+                      </button>
+                  </div>
               </div>
           </div>
       )}
 
-      {/* Edit Customer Profile Modal */}
+      {/* Edit Customer Profile Modal - kept as is */}
       {showEditCustomerModal && selectedCustomer && (
           <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95">
@@ -479,7 +688,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </div>
       )}
 
-      {/* Grant Access Modal */}
+      {/* Grant Access Modal - kept as is */}
       {showAccessModal && selectedCustomer && (
           <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-in zoom-in-95">
