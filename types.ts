@@ -40,6 +40,7 @@ export type User = {
   phone?: string;
   location?: string; // This can serve as pincode/city
   pincode?: string;
+  address?: string; // Full address editable by admin
   lastLogin?: string;
   createdAt?: string;
   isVerified?: boolean;       // B2B Approval Status

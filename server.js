@@ -87,7 +87,7 @@ const createTables = async () => {
             )`,
             `CREATE TABLE IF NOT EXISTS customers (
                 id VARCHAR(255) PRIMARY KEY, phone VARCHAR(50) UNIQUE, name VARCHAR(255),
-                pincode VARCHAR(20), lastLocation JSON, role VARCHAR(50), createdAt DATETIME,
+                pincode VARCHAR(20), address TEXT, lastLocation JSON, role VARCHAR(50), createdAt DATETIME,
                 isVerified BOOLEAN DEFAULT FALSE, accessExpiresAt DATETIME
             )`,
             `CREATE TABLE IF NOT EXISTS app_config (id INT PRIMARY KEY DEFAULT 1, data JSON, CHECK (id = 1))`,
@@ -114,6 +114,7 @@ const createTables = async () => {
         // Migrations
         try { await pool.query(`ALTER TABLE customers ADD COLUMN isVerified BOOLEAN DEFAULT FALSE`); } catch (e) {}
         try { await pool.query(`ALTER TABLE customers ADD COLUMN accessExpiresAt DATETIME`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE customers ADD COLUMN address TEXT`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN duration INT DEFAULT 0`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN meta JSON`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN category VARCHAR(100)`); } catch (e) {}
@@ -401,8 +402,27 @@ app.get('/api/customers', async (req, res) => {
 
 app.get('/api/customers/check/:phone', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT name, pincode, isVerified, accessExpiresAt FROM customers WHERE phone=?', [req.params.phone]);
+        const [rows] = await pool.query('SELECT name, pincode, isVerified, accessExpiresAt, address FROM customers WHERE phone=?', [req.params.phone]);
         res.json({ exists: !!rows[0], user: rows[0] || null });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/customers/:id', async (req, res) => {
+    try {
+        const { name, phone, pincode, address } = req.body;
+        // For security, only update specific fields
+        const updates = [];
+        const values = [];
+        if (name !== undefined) { updates.push('name=?'); values.push(name); }
+        if (phone !== undefined) { updates.push('phone=?'); values.push(phone); }
+        if (pincode !== undefined) { updates.push('pincode=?'); values.push(pincode); }
+        if (address !== undefined) { updates.push('address=?'); values.push(address); }
+        
+        if (updates.length > 0) {
+            values.push(req.params.id);
+            await pool.query(`UPDATE customers SET ${updates.join(', ')} WHERE id=?`, values);
+        }
+        res.json({ success: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -430,8 +450,8 @@ app.post('/api/auth/whatsapp', async (req, res) => {
             if (location) { updates.push('lastLocation=?'); values.push(JSON.stringify(location)); }
             if (updates.length > 0) { values.push(user.id); await pool.query(`UPDATE customers SET ${updates.join(', ')} WHERE id=?`, values); }
         } else {
-            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date(), isVerified: false, accessExpiresAt: null };
-            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt, isVerified, accessExpiresAt) VALUES (?,?,?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt, false, null]);
+            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date(), isVerified: false, accessExpiresAt: null, address: '' };
+            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt, isVerified, accessExpiresAt, address) VALUES (?,?,?,?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt, false, null, '']);
         }
         res.json(user);
     } catch (err) { res.status(500).json({ error: err.message }); }

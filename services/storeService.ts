@@ -263,6 +263,13 @@ export const storeService = {
       });
   },
 
+  updateCustomerProfile: async (userId: string, updates: Partial<User>) => {
+      await apiFetch(`/customers/${userId}`, {
+          method: 'PUT',
+          body: JSON.stringify(updates)
+      });
+  },
+
   requestRenewal: async () => {
       const user = storeService.getCurrentUser();
       const config = await storeService.getConfig();

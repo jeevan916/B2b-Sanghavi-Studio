@@ -6,7 +6,7 @@ import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails } fr
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -41,7 +41,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
 
   // Customer Management State
   const [showAccessModal, setShowAccessModal] = useState(false);
+  const [showEditCustomerModal, setShowEditCustomerModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
+  const [editCustomerData, setEditCustomerData] = useState<Partial<User>>({});
   const [accessDuration, setAccessDuration] = useState(7); // Days
 
   const refreshData = async (background = false) => {
@@ -143,6 +145,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       await storeService.grantAccess(selectedCustomer.id, accessDuration);
       setShowAccessModal(false);
       refreshData(true);
+  };
+
+  const handleSaveCustomerEdit = async () => {
+      if (!selectedCustomer || !editCustomerData) return;
+      try {
+          await storeService.updateCustomerProfile(selectedCustomer.id, editCustomerData);
+          setShowEditCustomerModal(false);
+          refreshData(true);
+      } catch (e) {
+          alert("Failed to update profile.");
+      }
+  };
+
+  const openCustomerEdit = (customer: User) => {
+      setSelectedCustomer(customer);
+      setEditCustomerData({
+          name: customer.name,
+          phone: customer.phone,
+          pincode: customer.pincode,
+          address: customer.address || ''
+      });
+      setShowEditCustomerModal(true);
   };
 
   // --- Order Actions ---
@@ -302,7 +326,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                           )}
                                       </td>
                                       <td className="p-6 text-right flex gap-2 justify-end">
-                                          <button onClick={() => storeService.chatWithLead(customer)} className="text-stone-400 hover:text-green-600 p-2 rounded-full hover:bg-green-50 transition">
+                                          <button onClick={() => openCustomerEdit(customer)} className="p-2 text-stone-400 hover:text-stone-600 rounded-full hover:bg-stone-100 transition" title="Edit Profile">
+                                              <Edit2 size={16} />
+                                          </button>
+                                          <button onClick={() => storeService.chatWithLead(customer)} className="text-stone-400 hover:text-green-600 p-2 rounded-full hover:bg-green-50 transition" title="Chat on WhatsApp">
                                               <MessageCircle size={18} />
                                           </button>
                                           <button 
@@ -393,6 +420,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                           ))}
                       </tbody>
                   </table>
+              </div>
+          </div>
+      )}
+
+      {/* Edit Customer Profile Modal */}
+      {showEditCustomerModal && selectedCustomer && (
+          <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95">
+                  <div className="p-6 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
+                      <h3 className="font-serif text-xl font-bold text-stone-800">Edit Customer Profile</h3>
+                      <button onClick={() => setShowEditCustomerModal(false)}><X size={20} className="text-stone-400" /></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                      <div>
+                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Full Name</label>
+                          <input 
+                              value={editCustomerData.name || ''} 
+                              onChange={e => setEditCustomerData({...editCustomerData, name: e.target.value})}
+                              className="w-full p-3 border border-stone-200 rounded-xl text-sm"
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">WhatsApp Number</label>
+                          <input 
+                              value={editCustomerData.phone || ''} 
+                              onChange={e => setEditCustomerData({...editCustomerData, phone: e.target.value})}
+                              className="w-full p-3 border border-stone-200 rounded-xl text-sm font-mono"
+                          />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Pincode</label>
+                              <input 
+                                  value={editCustomerData.pincode || ''} 
+                                  onChange={e => setEditCustomerData({...editCustomerData, pincode: e.target.value})}
+                                  className="w-full p-3 border border-stone-200 rounded-xl text-sm"
+                              />
+                          </div>
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Full Address</label>
+                          <textarea 
+                              value={editCustomerData.address || ''} 
+                              onChange={e => setEditCustomerData({...editCustomerData, address: e.target.value})}
+                              className="w-full p-3 border border-stone-200 rounded-xl text-sm h-24"
+                              placeholder="Street, City, State..."
+                          />
+                      </div>
+                  </div>
+                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
+                      <button onClick={() => setShowEditCustomerModal(false)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
+                      <button onClick={handleSaveCustomerEdit} className="px-6 py-2 bg-stone-900 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition">
+                          <Save size={16} /> Save Changes
+                      </button>
+                  </div>
               </div>
           </div>
       )}

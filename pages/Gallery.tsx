@@ -169,10 +169,16 @@ export const Gallery: React.FC = () => {
       });
   };
 
-  const trendingStats = useMemo(() => {
-      const liveViewers = Math.floor(Math.random() * 5) + 3; 
-      return { live: liveViewers, total: products.length };
-  }, [products]);
+  const getAccessStatus = () => {
+      if (!user?.accessExpiresAt) return null;
+      const now = new Date();
+      const expiry = new Date(user.accessExpiresAt);
+      const diffTime = expiry.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffTime < 0) return "Expired";
+      return `${diffDays} Days Remaining`;
+  };
 
   // --- ACCESS CONTROL STATES ---
 
@@ -257,16 +263,21 @@ export const Gallery: React.FC = () => {
   }
 
   const isMainCatalogView = activeCategory === 'All' && activeSubCategory === 'All' && !search;
+  const accessStatus = getAccessStatus();
 
   return (
     <div className="min-h-screen bg-stone-50 pb-20 md:pt-16 animate-in fade-in duration-700">
-      <div className="bg-stone-900 text-gold-500 text-[10px] font-bold uppercase tracking-widest py-1.5 px-4 flex items-center justify-between z-50">
-         <div className="flex items-center gap-2 animate-pulse">
-            <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div> Live Studio Pulse
+      <div className="bg-stone-900 text-gold-500 text-[10px] font-bold uppercase tracking-widest py-2 px-4 flex items-center justify-between z-50 shadow-md">
+         <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+            <span>Hi, {user.name.split(' ')[0]}</span>
          </div>
          <div className="flex items-center gap-4">
-            <span className="text-white hidden sm:inline">Active Sessions: {trendingStats.live}</span>
-            <span className="text-gold-300">New arrivals logged</span>
+            {accessStatus && (
+                <span className="text-gold-300 flex items-center gap-1">
+                    <Clock size={10} /> {accessStatus}
+                </span>
+            )}
          </div>
       </div>
 
