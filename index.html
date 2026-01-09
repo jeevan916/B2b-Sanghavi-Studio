@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -11,7 +10,7 @@
     <link rel="dns-prefetch" href="https://esm.sh" />
     
     <!-- PWA & Mobile Meta -->
-    <meta name="theme-color" content="#c68a36" />
+    <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="./manifest.json" />
@@ -50,7 +49,7 @@
 </script>
     
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
     
     <script>
       window.tailwind.config = {
@@ -61,25 +60,81 @@
               serif: ['Playfair Display', 'serif'],
             },
             colors: {
+              // B2B Enterprise Palette Override
+              // Mapping 'stone' to 'Slate/Gray' for a cooler, professional look
+              stone: {
+                50: '#f8fafc',
+                100: '#f1f5f9',
+                200: '#e2e8f0',
+                300: '#cbd5e1',
+                400: '#94a3b8',
+                500: '#64748b',
+                600: '#475569',
+                700: '#334155',
+                800: '#1e293b',
+                900: '#0f172a',
+                950: '#020617',
+              },
+              // Refined Enterprise Bronze/Gold
               gold: {
-                50: '#fbf8f1', 100: '#f5efdb', 200: '#ebdbb2', 300: '#dec082', 400: '#d1a355',
-                500: '#c68a36', 600: '#aa6c29', 700: '#885025', 800: '#704126', 900: '#5e3722',
+                50: '#fdfbf7',
+                100: '#f5efe4',
+                200: '#e6d3ba',
+                300: '#d5b38d',
+                400: '#c2925e',
+                500: '#b0773f', // Solid Bronze
+                600: '#925d30',
+                700: '#764828',
+                800: '#603c25',
+                900: '#4f3220',
+                950: '#2a190f',
               }
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.3s ease-out forwards',
+              'slide-up': 'slideUp 0.3s ease-out forwards',
+            },
+            keyframes: {
+              fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+              slideUp: { '0%': { transform: 'translateY(10px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } }
             }
           }
         }
       }
     </script>
     <style>
-      body { -webkit-tap-highlight-color: transparent; background-color: #fbf8f1; margin: 0; padding: 0; }
-      #initial-loader {
-        position: fixed; inset: 0; background: #fbf8f1;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        z-index: 9999; transition: opacity 0.5s ease-out;
+      body { 
+        -webkit-tap-highlight-color: transparent; 
+        background-color: #f8fafc; 
+        margin: 0; padding: 0; 
+        color: #1e293b;
       }
-      .splash-logo { font-family: 'Playfair Display', serif; font-size: 2.5rem; color: #c68a36; }
-      .loading-bar-container { width: 120px; height: 2px; background: #ebdbb2; margin-top: 2rem; position: relative; overflow: hidden; }
-      .loading-bar-progress { position: absolute; height: 100%; width: 30%; background: #c68a36; left: -30%; animation: loadingSlide 1.5s infinite ease-in-out; }
+      
+      /* Enterprise Scrollbar */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+      /* Snappy Interactions */
+      button, a, div[role="button"] { 
+        transition-property: all;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        transition-duration: 200ms;
+      }
+      
+      button:active:not(:disabled), a:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+
+      #initial-loader {
+        position: fixed; inset: 0; background: #0f172a;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        z-index: 9999; transition: opacity 0.3s ease-out;
+      }
+      .splash-logo { font-family: 'Playfair Display', serif; font-size: 2.5rem; color: #b0773f; letter-spacing: -0.02em; }
+      .loading-bar-container { width: 140px; height: 1px; background: #334155; margin-top: 2rem; position: relative; overflow: hidden; }
+      .loading-bar-progress { position: absolute; height: 100%; width: 30%; background: #b0773f; left: -30%; animation: loadingSlide 1s infinite linear; }
       @keyframes loadingSlide { 0% { left: -30%; } 100% { left: 100%; } }
       .loaded #initial-loader { opacity: 0; visibility: hidden; pointer-events: none; }
     </style>
@@ -93,7 +148,7 @@
     <script type="module" src="./index.tsx"></script>
     <script>
       window.addEventListener('load', () => {
-        setTimeout(() => document.body.classList.add('loaded'), 500);
+        setTimeout(() => document.body.classList.add('loaded'), 300);
       });
     </script>
   </body>
