@@ -22,10 +22,12 @@ export type Product = {
     soldTo?: string; // ID of the buyer
     soldDate?: string;
     orderId?: string;
+    isReserved?: boolean; // New reservation flag
+    reservedBy?: string;
   };
 };
 
-export type ItemStatus = 'pending' | 'confirmed' | 'rejected' | 'moved' | 'dispatched';
+export type ItemStatus = 'pending' | 'confirmed' | 'rejected' | 'moved' | 'dispatched' | 'asked_for';
 
 export interface CartItem {
   product: Product;

@@ -438,6 +438,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           case 'cancelled': 
           case 'rejected': return 'bg-red-100 text-red-800 border-red-200';
           case 'moved': return 'bg-purple-100 text-purple-800 border-purple-200';
+          case 'asked_for': return 'bg-orange-100 text-orange-800 border-orange-200';
           default: return 'bg-stone-100 text-stone-800';
       }
   };
@@ -583,7 +584,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                                   <p className="text-xs text-stone-500 font-mono">#{item.product.id.slice(-6).toUpperCase()}</p>
                                               </div>
                                               <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
-                                                  {item.status || 'Pending'}
+                                                  {item.status === 'asked_for' ? 'Waitlist' : (item.status || 'Pending')}
                                               </span>
                                           </div>
                                           
@@ -606,7 +607,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                       </div>
 
                                       <div className="flex md:flex-col gap-2 justify-end md:justify-center border-t md:border-t-0 md:border-l border-stone-100 pt-4 md:pt-0 md:pl-4">
-                                          {(!item.status || item.status === 'pending') && (
+                                          {(!item.status || item.status === 'pending' || item.status === 'asked_for') && (
                                               <>
                                                   <button onClick={() => handleConfirmItem(item)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Confirm Item">
                                                       <CheckCircle size={20} />

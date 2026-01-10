@@ -547,8 +547,42 @@ app.post('/api/orders', async (req, res) => {
         const o = req.body;
         const id = crypto.randomUUID();
         const now = new Date();
+        
+        const processedItems = [];
+        
+        // 1. Check Product Availability and Mark as Reserved
+        for (const item of o.items) {
+            const [pRows] = await pool.query('SELECT meta, isHidden FROM products WHERE id=?', [item.product.id]);
+            
+            let itemStatus = 'pending';
+            let productMeta = {};
+            let isProductHidden = false;
+
+            if (pRows[0]) {
+                isProductHidden = pRows[0].isHidden;
+                productMeta = typeof pRows[0].meta === 'string' ? JSON.parse(pRows[0].meta) : (pRows[0].meta || {});
+            }
+
+            // Check if already reserved or hidden (sold)
+            if (isProductHidden || (productMeta.isReserved && productMeta.reservedBy !== o.customerId)) {
+                // If already reserved by someone else, this user gets "Waitlist" status
+                itemStatus = 'asked_for'; 
+            } else {
+                // Available! Mark as Reserved for this customer
+                productMeta.isReserved = true;
+                productMeta.reservedBy = o.customerId;
+                productMeta.reservationDate = now.toISOString();
+                productMeta.reservationOrderId = id;
+                
+                await pool.query('UPDATE products SET meta=? WHERE id=?', [JSON.stringify(productMeta), item.product.id]);
+            }
+            
+            processedItems.push({ ...item, status: itemStatus });
+        }
+
         await pool.query('INSERT INTO orders (id, customerId, customerName, customerPhone, items, totalItems, totalWeight, status, deliveryDetails, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', 
-            [id, o.customerId, o.customerName, o.customerPhone, JSON.stringify(o.items.map(i => ({...i, status: 'pending'}))), o.totalItems, o.totalWeight, 'pending', JSON.stringify({}), now, now]);
+            [id, o.customerId, o.customerName, o.customerPhone, JSON.stringify(processedItems), o.totalItems, o.totalWeight, 'pending', JSON.stringify({}), now, now]);
+            
         res.json({ success: true, orderId: id });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });

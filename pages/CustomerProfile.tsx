@@ -224,6 +224,7 @@ export const CustomerProfile: React.FC = () => {
             case 'cancelled': 
             case 'rejected': return 'bg-red-100 text-red-800 border-red-200';
             case 'moved': return 'bg-purple-100 text-purple-800 border-purple-200';
+            case 'asked_for': return 'bg-orange-100 text-orange-800 border-orange-200';
             default: return 'bg-stone-100 text-stone-800';
         }
     };
@@ -458,7 +459,7 @@ export const CustomerProfile: React.FC = () => {
                                                     <p className="text-xs text-stone-400 font-mono mt-0.5">#{item.product.id.slice(-6).toUpperCase()}</p>
                                                 </div>
                                                 <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
-                                                    {item.status || 'Pending'}
+                                                    {item.status === 'asked_for' ? 'Waitlist' : (item.status || 'Pending')}
                                                 </span>
                                             </div>
                                             
@@ -479,6 +480,12 @@ export const CustomerProfile: React.FC = () => {
                                             {item.status === 'moved' && (
                                                 <div className="mt-2 text-xs text-purple-600 italic">
                                                     Moved to Custom Order list for bespoke processing.
+                                                </div>
+                                            )}
+                                            
+                                            {item.status === 'asked_for' && (
+                                                <div className="mt-2 text-xs text-orange-600 italic">
+                                                    Item already reserved by another client. You are on waitlist.
                                                 </div>
                                             )}
 

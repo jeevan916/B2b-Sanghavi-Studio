@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { Product } from '../types';
-import { Share2, Plus, ChevronLeft, ChevronRight, Maximize2, Heart, ShoppingBag, Eye } from 'lucide-react';
+import { Share2, Plus, ChevronLeft, ChevronRight, Maximize2, Heart, ShoppingBag, Eye, Check } from 'lucide-react';
 import { storeService } from '../services/storeService';
 import { useCart } from '../contexts/CartContext';
 
@@ -14,7 +15,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
   const isGuest = !storeService.getCurrentUser();
-  const { addToCart } = useCart();
+  const { addToCart, cart, setIsCartOpen } = useCart();
+
+  const isInCart = cart.some(item => item.product.id === product.id);
 
   useEffect(() => {
     const likes = storeService.getLikes();
@@ -29,9 +32,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
     if (liked) storeService.logEvent('like', product);
   };
 
-  const handleAddToCart = (e: React.MouseEvent) => {
+  const handleCartAction = (e: React.MouseEvent) => {
     e.stopPropagation();
-    addToCart(product);
+    if (isInCart) {
+        setIsCartOpen(true);
+    } else {
+        addToCart(product);
+    }
   };
 
   const getImageUrl = (path: string) => {
@@ -83,8 +90,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
         </div>
         
         <div className="flex gap-2 mt-auto">
-          <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white text-[10px] py-2 rounded-md hover:bg-gold-600 transition-colors flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider shadow-sm">
-            <ShoppingBag size={12} /> Add
+          <button 
+            onClick={handleCartAction} 
+            className={`flex-1 text-[10px] py-2 rounded-md transition-colors flex items-center justify-center gap-1.5 font-bold uppercase tracking-wider shadow-sm ${
+                isInCart 
+                ? 'bg-gold-50 text-gold-700 border border-gold-200' 
+                : 'bg-stone-900 text-white hover:bg-gold-600'
+            }`}
+          >
+            {isInCart ? (
+                <><Check size={12} /> In Bag</>
+            ) : (
+                <><ShoppingBag size={12} /> Add</>
+            )}
           </button>
           <button onClick={(e) => { e.stopPropagation(); navigator.share?.({ title: product.title, url: window.location.href }); }} className="p-2 text-stone-500 hover:text-stone-900 hover:bg-stone-50 border border-stone-200 rounded-md transition-colors">
             <Share2 size={14} />
