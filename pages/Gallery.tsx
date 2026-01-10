@@ -3,8 +3,9 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { ProductCard } from '../components/ProductCard';
 import { storeService, CuratedCollections } from '../services/storeService';
-import { Search, Grid, LayoutGrid, LogOut, Loader2, Filter, Sparkles, TrendingUp, Clock, Heart, Gem, Unlock, Lock, ShieldAlert, History } from 'lucide-react';
+import { Search, Grid, LayoutGrid, LogOut, Loader2, Filter, Sparkles, TrendingUp, Clock, Heart, Gem, Unlock, Lock, ShieldAlert, History, ShoppingBag } from 'lucide-react';
 import { Product, AnalyticsEvent, AppConfig } from '../types';
+import { useCart } from '../contexts/CartContext';
 
 const CuratedSection: React.FC<{ title: string, products: Product[], icon: React.ElementType, accent: string, onProductClick: (id: string) => void }> = ({ title, products, icon: Icon, accent, onProductClick }) => {
     if (!products || products.length === 0) return null;
@@ -27,6 +28,7 @@ const CuratedSection: React.FC<{ title: string, products: Product[], icon: React
 export const Gallery: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setIsCartOpen, totalItems } = useCart();
   
   // Access Control State
   const user = storeService.getCurrentUser();
@@ -295,6 +297,12 @@ export const Gallery: React.FC = () => {
                     />
                 </div>
                 <div className="flex gap-2 items-center">
+                    <button onClick={() => setIsCartOpen(true)} className="p-2 text-stone-400 hover:text-gold-600 transition relative">
+                        <ShoppingBag size={20}/>
+                        {totalItems > 0 && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-gold-600 rounded-full"></span>
+                        )}
+                    </button>
                     <button onClick={() => setViewMode(viewMode === 'grid' ? 'masonry' : 'grid')} className="p-2 text-stone-400 hover:text-gold-600 transition">
                         {viewMode === 'grid' ? <LayoutGrid size={20}/> : <Grid size={20}/>}
                     </button>

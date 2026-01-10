@@ -6,8 +6,9 @@ import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, Car
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye
 } from 'lucide-react';
+import { ImageViewer } from '../components/ImageViewer';
 
 interface AdminDashboardProps {
   onNavigate?: (tab: string) => void;
@@ -52,6 +53,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
   const [editCustomerData, setEditCustomerData] = useState<Partial<User>>({});
   const [accessDuration, setAccessDuration] = useState(7); // Days
+
+  // Image Zoom State
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
 
   const refreshData = async (background = false) => {
     if (!background) setLoading(true);
@@ -138,6 +142,160 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           address: customer.address || ''
       });
       setShowEditCustomerModal(true);
+  };
+
+  // --- PDF GENERATION ---
+  const getFullUrl = (path: string) => {
+      if (!path) return '';
+      if (path.startsWith('data:') || path.startsWith('http')) return path;
+      return `${window.location.origin}${path.startsWith('/') ? path : `/${path}`}`;
+  };
+
+  const generateOrderPDF = (order: Order) => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const itemsHtml = order.items.map((item, idx) => `
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${idx + 1}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <img src="${getFullUrl(item.product.thumbnails[0] || item.product.images[0])}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" />
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: bold;">${item.product.title}</div>
+                    <div style="font-size: 10px; color: #666;">ID: ${item.product.id.slice(-6).toUpperCase()}</div>
+                    <div style="font-size: 10px; color: #666;">Supplier: ${item.product.supplier || 'N/A'}</div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.category}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.quantity}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.weight}g</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${(item.product.weight * item.quantity).toFixed(2)}g</td>
+            </tr>
+        `).join('');
+
+        const html = `
+            <html>
+            <head>
+                <title>Order #${order.id.slice(0,8)}</title>
+                <style>
+                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
+                    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #b0773f; padding-bottom: 20px; margin-bottom: 30px; }
+                    .logo { font-size: 24px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
+                    .meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-size: 12px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
+                    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                    th { text-align: left; padding: 10px; border-bottom: 2px solid #eee; color: #888; text-transform: uppercase; font-size: 10px; }
+                    .totals { margin-top: 30px; text-align: right; font-size: 14px; }
+                    @media print { button { display: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <div class="logo">Sanghavi Jewel Studio</div>
+                    <div>
+                        <div style="font-size: 20px; font-weight: bold;">Order #${order.id.slice(0,8).toUpperCase()}</div>
+                        <div style="font-size: 12px; color: #888;">${new Date(order.createdAt).toLocaleDateString()}</div>
+                    </div>
+                </div>
+                <div class="meta">
+                    <div>
+                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">CUSTOMER</div>
+                        <div>${order.customerName}</div>
+                        <div>${order.customerPhone}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">STATUS</div>
+                        <div style="text-transform: uppercase; font-weight: bold;">${order.status}</div>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Image</th>
+                            <th>Item Details</th>
+                            <th>Category</th>
+                            <th>Qty</th>
+                            <th>Unit Wt</th>
+                            <th>Total Wt</th>
+                        </tr>
+                    </thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div class="totals">
+                    <p>Total Items: <strong>${order.totalItems}</strong></p>
+                    <p>Total Weight: <strong>${order.totalWeight.toFixed(3)}g</strong></p>
+                </div>
+                <script>window.print();</script>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+  };
+
+  const generateItemPDF = (item: CartItem) => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+            <html>
+            <head>
+                <title>Item Spec - ${item.product.title}</title>
+                <style>
+                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
+                    .container { max-width: 800px; margin: 0 auto; border: 1px solid #eee; padding: 40px; }
+                    .header { text-align: center; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }
+                    .logo { font-size: 18px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
+                    .content { display: flex; gap: 40px; align-items: flex-start; }
+                    .image-col { width: 50%; }
+                    .image-col img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
+                    .details-col { width: 50%; }
+                    .label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #888; margin-top: 15px; margin-bottom: 4px; }
+                    .value { font-size: 16px; font-weight: 500; border-bottom: 1px solid #f5f5f5; padding-bottom: 4px; }
+                    .desc { font-size: 13px; line-height: 1.6; color: #555; margin-top: 4px; }
+                    @media print { body { padding: 0; } .container { border: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="logo">Sanghavi Jewel Studio</div>
+                        <div style="font-size: 12px; color: #888; margin-top: 5px;">Admin Specification Sheet</div>
+                    </div>
+                    <div class="content">
+                        <div class="image-col">
+                            <img src="${getFullUrl(item.product.images[0])}" />
+                        </div>
+                        <div class="details-col">
+                            <div class="label">Product Title</div>
+                            <div class="value">${item.product.title}</div>
+
+                            <div class="label">SKU / ID</div>
+                            <div class="value">#${item.product.id.slice(-6).toUpperCase()}</div>
+
+                            <div class="label">Supplier</div>
+                            <div class="value">${item.product.supplier || 'In-House'}</div>
+
+                            <div class="label">Category</div>
+                            <div class="value">${item.product.category} / ${item.product.subCategory}</div>
+
+                            <div class="label">Weight</div>
+                            <div class="value">${item.product.weight}g</div>
+
+                            <div class="label">Description</div>
+                            <div class="desc">${item.product.description || 'No description available.'}</div>
+                            
+                            <div class="label" style="margin-top: 30px;">Order Details</div>
+                            <div class="value" style="font-size: 14px;">Quantity: ${item.quantity} | Status: ${item.status || 'Pending'}</div>
+                        </div>
+                    </div>
+                </div>
+                <script>window.print();</script>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
   };
 
   // --- Order Item Actions ---
@@ -382,10 +540,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                               <button onClick={() => setIsOrderDetailOpen(false)} className="flex items-center gap-2 text-stone-500 hover:text-stone-900 mb-2 text-xs font-bold uppercase tracking-widest">
                                   <ArrowLeft size={16} /> Back to List
                               </button>
-                              <h3 className="font-serif text-2xl text-stone-800 font-bold flex items-center gap-3">
-                                  Order #{selectedOrder.id.slice(0,8).toUpperCase()}
-                                  <span className={`px-3 py-1 rounded-full text-xs border font-sans ${getStatusColor(selectedOrder.status)}`}>{selectedOrder.status}</span>
-                              </h3>
+                              <div className="flex items-center gap-4">
+                                  <h3 className="font-serif text-2xl text-stone-800 font-bold flex items-center gap-3">
+                                      Order #{selectedOrder.id.slice(0,8).toUpperCase()}
+                                      <span className={`px-3 py-1 rounded-full text-xs border font-sans ${getStatusColor(selectedOrder.status)}`}>{selectedOrder.status}</span>
+                                  </h3>
+                                  <button onClick={() => generateOrderPDF(selectedOrder)} className="text-gold-600 hover:underline text-xs font-bold uppercase flex items-center gap-1">
+                                      <Printer size={14}/> Download PDF
+                                  </button>
+                              </div>
                               <p className="text-stone-500 text-sm mt-1">{selectedOrder.customerName} • +{selectedOrder.customerPhone} • {new Date(selectedOrder.createdAt).toLocaleString()}</p>
                           </div>
                           
@@ -401,10 +564,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                       <div className="flex-1 overflow-y-auto p-6">
                           <div className="grid grid-cols-1 gap-4">
                               {selectedOrder.items.map((item, idx) => (
-                                  <div key={idx} className="flex gap-4 p-4 border border-stone-100 rounded-xl hover:shadow-md transition-shadow bg-white">
-                                      <div className="w-24 h-24 bg-stone-100 rounded-lg overflow-hidden shrink-0">
-                                          <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-full h-full object-cover" />
+                                  <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 border border-stone-100 rounded-xl hover:shadow-md transition-shadow bg-white">
+                                      {/* Larger Clickable Image */}
+                                      <div 
+                                          className="w-full md:w-32 h-32 bg-stone-100 rounded-lg overflow-hidden shrink-0 relative group cursor-zoom-in border border-stone-200"
+                                          onClick={() => setZoomImage(getFullUrl(item.product.images[0]))}
+                                      >
+                                          <img src={getFullUrl(item.product.thumbnails[0] || item.product.images[0])} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-colors">
+                                              <Eye className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md" size={24}/>
+                                          </div>
                                       </div>
+
                                       <div className="flex-1 min-w-0">
                                           <div className="flex justify-between items-start">
                                               <div>
@@ -416,18 +587,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                               </span>
                                           </div>
                                           
-                                          <div className="flex gap-6 mt-2 text-sm text-stone-600">
+                                          <div className="flex flex-wrap gap-4 mt-2 text-sm text-stone-600">
                                               <span>Qty: <b>{item.quantity}</b></span>
                                               <span>Weight: <b>{item.product.weight}g</b></span>
+                                              <span>Supplier: <b>{item.product.supplier || 'N/A'}</b></span>
                                               {item.notes && <span className="bg-yellow-50 px-2 rounded text-yellow-700 border border-yellow-100">Note: {item.notes}</span>}
                                           </div>
 
                                           {item.rejectionReason && (
                                               <p className="mt-2 text-xs text-red-500 font-bold bg-red-50 p-2 rounded">Reason: {item.rejectionReason}</p>
                                           )}
+                                          
+                                          <div className="mt-3">
+                                              <button onClick={() => generateItemPDF(item)} className="text-[10px] font-bold uppercase text-stone-400 hover:text-gold-600 flex items-center gap-1">
+                                                  <Printer size={12}/> Spec Sheet
+                                              </button>
+                                          </div>
                                       </div>
 
-                                      <div className="flex flex-col gap-2 justify-center border-l border-stone-100 pl-4">
+                                      <div className="flex md:flex-col gap-2 justify-end md:justify-center border-t md:border-t-0 md:border-l border-stone-100 pt-4 md:pt-0 md:pl-4">
                                           {(!item.status || item.status === 'pending') && (
                                               <>
                                                   <button onClick={() => handleConfirmItem(item)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Confirm Item">
@@ -489,7 +667,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                                 {order.status}
                                             </span>
                                         </td>
-                                        <td className="p-4 text-right">
+                                        <td className="p-4 text-right flex items-center justify-end gap-2">
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); generateOrderPDF(order); }}
+                                                className="p-2 text-stone-400 hover:text-stone-800 rounded-lg hover:bg-stone-100"
+                                                title="Print PDF"
+                                            >
+                                                <Printer size={16} />
+                                            </button>
                                             <button className="text-gold-600 font-bold text-xs uppercase tracking-wider hover:underline">View Details</button>
                                         </td>
                                     </tr>
@@ -793,6 +978,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                   </div>
               </div>
           </div>
+      )}
+
+      {/* Global Image Viewer */}
+      {zoomImage && (
+          <ImageViewer 
+              images={[zoomImage]} 
+              initialIndex={0} 
+              onClose={() => setZoomImage(null)} 
+          />
       )}
     </div>
   );

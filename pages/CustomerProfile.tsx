@@ -1,12 +1,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { storeService } from '../services/storeService';
-import { User, Order, OrderStatus, ItemStatus } from '../types';
+import { User, Order, OrderStatus, ItemStatus, CartItem } from '../types';
 import { 
     User as UserIcon, Phone, MapPin, Lock, Save, Edit2, 
     Package, Loader2, Clock, CheckCircle, XCircle, 
-    ArrowRight, Box, AlertTriangle, Truck, History
+    ArrowRight, Box, AlertTriangle, Truck, History, Printer, Eye
 } from 'lucide-react';
+import { ImageViewer } from '../components/ImageViewer';
 
 export const CustomerProfile: React.FC = () => {
     const [user, setUser] = useState<User | null>(null);
@@ -16,6 +17,9 @@ export const CustomerProfile: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    
+    // Zoom State
+    const [zoomImage, setZoomImage] = useState<string | null>(null);
 
     useEffect(() => {
         const loadData = async () => {
@@ -54,6 +58,161 @@ export const CustomerProfile: React.FC = () => {
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const getFullUrl = (path: string) => {
+        if (!path) return '';
+        if (path.startsWith('data:') || path.startsWith('http')) return path;
+        return `${window.location.origin}${path.startsWith('/') ? path : `/${path}`}`;
+    };
+
+    // --- PDF GENERATORS ---
+
+    const generateOrderPDF = (order: Order) => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const itemsHtml = order.items.map((item, idx) => `
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${idx + 1}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <img src="${getFullUrl(item.product.thumbnails[0] || item.product.images[0])}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" />
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <div style="font-weight: bold;">${item.product.title}</div>
+                    <div style="font-size: 10px; color: #666;">ID: ${item.product.id.slice(-6).toUpperCase()}</div>
+                    <div style="font-size: 10px; color: #666;">Supplier: ${item.product.supplier || 'N/A'}</div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.category}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.quantity}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.weight}g</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${(item.product.weight * item.quantity).toFixed(2)}g</td>
+            </tr>
+        `).join('');
+
+        const html = `
+            <html>
+            <head>
+                <title>Order #${order.id.slice(0,8)}</title>
+                <style>
+                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
+                    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #b0773f; padding-bottom: 20px; margin-bottom: 30px; }
+                    .logo { font-size: 24px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
+                    .meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-size: 12px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
+                    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+                    th { text-align: left; padding: 10px; border-bottom: 2px solid #eee; color: #888; text-transform: uppercase; font-size: 10px; }
+                    .totals { margin-top: 30px; text-align: right; font-size: 14px; }
+                    @media print { button { display: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <div class="logo">Sanghavi Jewel Studio</div>
+                    <div>
+                        <div style="font-size: 20px; font-weight: bold;">Order #${order.id.slice(0,8).toUpperCase()}</div>
+                        <div style="font-size: 12px; color: #888;">${new Date(order.createdAt).toLocaleDateString()}</div>
+                    </div>
+                </div>
+                <div class="meta">
+                    <div>
+                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">CUSTOMER</div>
+                        <div>${order.customerName}</div>
+                        <div>${order.customerPhone}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">STATUS</div>
+                        <div style="text-transform: uppercase; font-weight: bold;">${order.status}</div>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Image</th>
+                            <th>Item Details</th>
+                            <th>Category</th>
+                            <th>Qty</th>
+                            <th>Unit Wt</th>
+                            <th>Total Wt</th>
+                        </tr>
+                    </thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div class="totals">
+                    <p>Total Items: <strong>${order.totalItems}</strong></p>
+                    <p>Total Weight: <strong>${order.totalWeight.toFixed(3)}g</strong></p>
+                </div>
+                <script>window.print();</script>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+    };
+
+    const generateItemPDF = (item: CartItem) => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+            <html>
+            <head>
+                <title>Item Spec - ${item.product.title}</title>
+                <style>
+                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
+                    .container { max-width: 800px; margin: 0 auto; border: 1px solid #eee; padding: 40px; }
+                    .header { text-align: center; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }
+                    .logo { font-size: 18px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
+                    .content { display: flex; gap: 40px; align-items: flex-start; }
+                    .image-col { width: 50%; }
+                    .image-col img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
+                    .details-col { width: 50%; }
+                    .label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #888; margin-top: 15px; margin-bottom: 4px; }
+                    .value { font-size: 16px; font-weight: 500; border-bottom: 1px solid #f5f5f5; padding-bottom: 4px; }
+                    .desc { font-size: 13px; line-height: 1.6; color: #555; margin-top: 4px; }
+                    @media print { body { padding: 0; } .container { border: none; } }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="logo">Sanghavi Jewel Studio</div>
+                        <div style="font-size: 12px; color: #888; margin-top: 5px;">Product Specification Sheet</div>
+                    </div>
+                    <div class="content">
+                        <div class="image-col">
+                            <img src="${getFullUrl(item.product.images[0])}" />
+                        </div>
+                        <div class="details-col">
+                            <div class="label">Product Title</div>
+                            <div class="value">${item.product.title}</div>
+
+                            <div class="label">SKU / ID</div>
+                            <div class="value">#${item.product.id.slice(-6).toUpperCase()}</div>
+
+                            <div class="label">Supplier</div>
+                            <div class="value">${item.product.supplier || 'In-House'}</div>
+
+                            <div class="label">Category</div>
+                            <div class="value">${item.product.category} / ${item.product.subCategory}</div>
+
+                            <div class="label">Weight</div>
+                            <div class="value">${item.product.weight}g</div>
+
+                            <div class="label">Description</div>
+                            <div class="desc">${item.product.description || 'No description available.'}</div>
+                            
+                            <div class="label" style="margin-top: 30px;">Order Details</div>
+                            <div class="value" style="font-size: 14px;">Quantity: ${item.quantity} | Status: ${item.status || 'Pending'}</div>
+                        </div>
+                    </div>
+                </div>
+                <script>window.print();</script>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(html);
+        printWindow.document.close();
     };
 
     const getStatusColor = (status: OrderStatus | ItemStatus | undefined) => {
@@ -194,10 +353,12 @@ export const CustomerProfile: React.FC = () => {
                             {orders.map(order => (
                                 <div 
                                     key={order.id} 
-                                    onClick={() => setSelectedOrder(order)}
-                                    className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm hover:shadow-md transition-all cursor-pointer group flex items-center justify-between"
+                                    className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm hover:shadow-md transition-all group flex flex-col md:flex-row md:items-center justify-between gap-4"
                                 >
-                                    <div className="flex items-center gap-4">
+                                    <div 
+                                        className="flex items-center gap-4 flex-1 cursor-pointer"
+                                        onClick={() => setSelectedOrder(order)}
+                                    >
                                         <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 border ${getStatusColor(order.status).replace('bg-', 'bg-opacity-20 border-')}`}>
                                             <Package size={20} className="opacity-70" />
                                         </div>
@@ -214,8 +375,20 @@ export const CustomerProfile: React.FC = () => {
                                             </p>
                                         </div>
                                     </div>
-                                    <div className="text-stone-300 group-hover:text-gold-500 transition-colors">
-                                        <ArrowRight size={20} />
+                                    <div className="flex items-center gap-2 border-t md:border-t-0 md:border-l border-stone-100 pt-3 md:pt-0 md:pl-4">
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); generateOrderPDF(order); }}
+                                            className="p-2 text-stone-400 hover:text-stone-800 hover:bg-stone-50 rounded-lg flex items-center gap-2 text-xs font-bold transition"
+                                            title="Download Order PDF"
+                                        >
+                                            <Printer size={16} /> <span className="md:hidden">Download PDF</span>
+                                        </button>
+                                        <button 
+                                            onClick={() => setSelectedOrder(order)}
+                                            className="p-2 text-stone-300 hover:text-gold-500 transition-colors ml-auto md:ml-0"
+                                        >
+                                            <ArrowRight size={20} />
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -227,11 +400,19 @@ export const CustomerProfile: React.FC = () => {
             {/* Order Details Modal */}
             {selectedOrder && (
                 <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col animate-in zoom-in-95">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col animate-in zoom-in-95">
                         <div className="p-5 border-b border-stone-100 flex justify-between items-center bg-stone-50 rounded-t-2xl">
                             <div>
                                 <h3 className="font-serif text-xl font-bold text-stone-800">Order Details</h3>
-                                <p className="text-xs text-stone-500">#{selectedOrder.id.slice(0,8).toUpperCase()}</p>
+                                <div className="flex items-center gap-3">
+                                    <p className="text-xs text-stone-500">#{selectedOrder.id.slice(0,8).toUpperCase()}</p>
+                                    <button 
+                                        onClick={() => generateOrderPDF(selectedOrder)}
+                                        className="text-[10px] font-bold uppercase tracking-widest text-gold-600 hover:underline flex items-center gap-1"
+                                    >
+                                        <Printer size={12} /> Download PDF
+                                    </button>
+                                </div>
                             </div>
                             <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-stone-200 rounded-full transition text-stone-500">
                                 <XCircle size={24} />
@@ -256,23 +437,40 @@ export const CustomerProfile: React.FC = () => {
                                 </div>
                             ) : null}
 
-                            <div className="space-y-3">
+                            <div className="space-y-4">
                                 {selectedOrder.items.map((item, idx) => (
-                                    <div key={idx} className="flex gap-4 p-3 border border-stone-100 rounded-xl bg-white">
-                                        <div className="w-16 h-16 bg-stone-100 rounded-lg overflow-hidden shrink-0 border border-stone-100">
-                                            <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-full h-full object-cover" />
+                                    <div key={idx} className="flex flex-col sm:flex-row gap-4 p-4 border border-stone-100 rounded-xl bg-white hover:shadow-sm transition-shadow">
+                                        {/* Image Section - Larger & Clickable */}
+                                        <div 
+                                            className="w-full sm:w-32 h-32 bg-stone-100 rounded-lg overflow-hidden shrink-0 border border-stone-200 cursor-zoom-in relative group"
+                                            onClick={() => setZoomImage(getFullUrl(item.product.images[0]))}
+                                        >
+                                            <img src={getFullUrl(item.product.thumbnails[0] || item.product.images[0])} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                                <Eye className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md" size={24} />
+                                            </div>
                                         </div>
-                                        <div className="flex-1 min-w-0">
+
+                                        <div className="flex-1 min-w-0 flex flex-col">
                                             <div className="flex justify-between items-start">
-                                                <h4 className="font-bold text-stone-800 text-sm truncate">{item.product.title}</h4>
-                                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
+                                                <div>
+                                                    <h4 className="font-bold text-stone-800 text-base">{item.product.title}</h4>
+                                                    <p className="text-xs text-stone-400 font-mono mt-0.5">#{item.product.id.slice(-6).toUpperCase()}</p>
+                                                </div>
+                                                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
                                                     {item.status || 'Pending'}
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-stone-500 mt-1">Qty: {item.quantity} • {item.product.weight}g</p>
+                                            
+                                            <div className="grid grid-cols-2 gap-y-1 gap-x-4 mt-3 text-xs text-stone-600">
+                                                <p>Category: <span className="font-medium text-stone-800">{item.product.category}</span></p>
+                                                <p>Weight: <span className="font-medium text-stone-800">{item.product.weight}g</span></p>
+                                                <p>Quantity: <span className="font-medium text-stone-800">{item.quantity}</span></p>
+                                                <p>Supplier: <span className="font-medium text-stone-800">{item.product.supplier || 'Sanghavi'}</span></p>
+                                            </div>
                                             
                                             {item.rejectionReason && (
-                                                <div className="mt-2 p-2 bg-red-50 text-red-700 text-xs rounded border border-red-100 flex items-start gap-1">
+                                                <div className="mt-3 p-2 bg-red-50 text-red-700 text-xs rounded border border-red-100 flex items-start gap-1">
                                                     <AlertTriangle size={12} className="mt-0.5 shrink-0" />
                                                     <span>{item.rejectionReason}</span>
                                                 </div>
@@ -283,6 +481,15 @@ export const CustomerProfile: React.FC = () => {
                                                     Moved to Custom Order list for bespoke processing.
                                                 </div>
                                             )}
+
+                                            <div className="mt-auto pt-3 flex justify-end">
+                                                <button 
+                                                    onClick={() => generateItemPDF(item)}
+                                                    className="text-xs font-bold text-stone-500 hover:text-gold-600 flex items-center gap-1 bg-stone-50 hover:bg-gold-50 px-3 py-1.5 rounded transition-colors"
+                                                >
+                                                    <Printer size={14} /> Spec Sheet
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
@@ -297,6 +504,15 @@ export const CustomerProfile: React.FC = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Global Image Viewer */}
+            {zoomImage && (
+                <ImageViewer 
+                    images={[zoomImage]} 
+                    initialIndex={0} 
+                    onClose={() => setZoomImage(null)} 
+                />
             )}
         </div>
     );

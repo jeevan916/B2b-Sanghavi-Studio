@@ -13,7 +13,7 @@ export const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { addToCart } = useCart();
+  const { addToCart, setIsCartOpen, totalItems } = useCart();
   
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,8 +118,7 @@ export const ProductDetails: React.FC = () => {
       }
       if (product) {
           addToCart(product);
-          // Optional visual feedback
-          alert("Added to B2B Order Cart");
+          setIsCartOpen(true);
       }
   };
 
@@ -172,6 +171,12 @@ export const ProductDetails: React.FC = () => {
             <h2 className="font-serif font-bold text-stone-800 text-lg truncate">{product.title}</h2>
         </div>
         <div className="flex gap-1 shrink-0">
+            <button onClick={() => setIsCartOpen(true)} className="p-2 text-stone-600 hover:text-gold-600 rounded-full relative transition">
+                <ShoppingBag size={20} />
+                {totalItems > 0 && (
+                    <span className="absolute top-1 right-1 w-2 h-2 bg-gold-600 rounded-full"></span>
+                )}
+            </button>
             <button onClick={() => navigator.share?.({ title: product.title, url: window.location.href })} className="p-2 text-stone-600 hover:text-gold-600 rounded-full"><Share2 size={20} /></button>
         </div>
       </div>
