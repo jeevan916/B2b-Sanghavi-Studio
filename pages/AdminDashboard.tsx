@@ -2,11 +2,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { storeService } from '../services/storeService';
-import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus, AppConfig } from '../types';
+import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus, AppConfig, CustomOrder } from '../types';
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye, Unlock, Share2, FolderInput, Copy, EyeOff, MoreHorizontal
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye, Unlock, Share2, FolderInput, Copy, EyeOff, MoreHorizontal, ArrowRight, XCircle, Wrench
 } from 'lucide-react';
 import { ImageViewer } from '../components/ImageViewer';
 
@@ -48,6 +48,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [dispatchDetails, setDispatchDetails] = useState<DeliveryDetails>({ mode: 'logistics' });
   const [dispatchLoading, setDispatchLoading] = useState(false);
   
+  // Order Item Processing State
+  const [processingItem, setProcessingItem] = useState<{ orderId: string, item: CartItem } | null>(null);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [customOrderDetails, setCustomOrderDetails] = useState({ requirements: '', date: '' });
+
   // Customer Management State
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
@@ -195,6 +202,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       if (!selectedCustomer) return;
       await storeService.grantAccess(selectedCustomer.id, accessDuration);
       setShowAccessModal(false);
+      refreshData(true);
+  };
+
+  // --- ITEM PROCESSING ACTIONS ---
+  const handleItemAction = (item: CartItem, action: 'confirm' | 'reject' | 'custom') => {
+      if (!selectedOrder) return;
+      setProcessingItem({ orderId: selectedOrder.id, item });
+      
+      if (action === 'confirm') {
+          storeService.updateOrderItemStatus(selectedOrder.id, item.product.id, 'confirmed')
+              .then(() => refreshData(true));
+      } else if (action === 'reject') {
+          setRejectReason('');
+          setShowRejectModal(true);
+      } else if (action === 'custom') {
+          setCustomOrderDetails({ requirements: item.notes || '', date: '' });
+          setShowCustomModal(true);
+      }
+  };
+
+  const confirmReject = async () => {
+      if (!processingItem || !rejectReason) return;
+      await storeService.updateOrderItemStatus(processingItem.orderId, processingItem.item.product.id, 'rejected', rejectReason);
+      setShowRejectModal(false);
+      setProcessingItem(null);
+      refreshData(true);
+  };
+
+  const confirmCustomOrder = async () => {
+      if (!processingItem || !selectedOrder) return;
+      
+      const customOrder: Partial<CustomOrder> = {
+          originalOrderId: selectedOrder.id,
+          productId: processingItem.item.product.id,
+          productTitle: processingItem.item.product.title,
+          productImage: processingItem.item.product.images[0],
+          customerName: selectedOrder.customerName,
+          requirements: customOrderDetails.requirements,
+          deliveryDate: customOrderDetails.date
+      };
+
+      await storeService.moveItemToCustomOrder(customOrder);
+      await storeService.updateOrderItemStatus(selectedOrder.id, processingItem.item.product.id, 'moved', 'Moved to Custom Order');
+      
+      setShowCustomModal(false);
+      setProcessingItem(null);
       refreshData(true);
   };
 
@@ -439,7 +492,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                {activeView === 'orders' && (
                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                        {/* Order List */}
-                       <div className="lg:col-span-1 space-y-4">
+                       <div className="lg:col-span-1 space-y-4 max-h-[80vh] overflow-y-auto pr-2">
                            {orders.map(order => (
                                <div 
                                    key={order.id} 
@@ -468,36 +521,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                        <div className="flex gap-2">
                                            {selectedOrder.status !== 'dispatched' && selectedOrder.status !== 'delivered' && (
                                                <button onClick={() => setShowDispatchModal(true)} className="px-4 py-2 bg-teal-600 text-white rounded-lg font-bold text-sm hover:bg-teal-500 transition">
-                                                   Dispatch
+                                                   Dispatch All
                                                </button>
                                            )}
                                             {selectedOrder.status === 'pending' && (
                                                <button onClick={() => storeService.updateOrderStatus(selectedOrder.id, 'confirmed').then(() => refreshData(true))} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-500 transition">
-                                                   Confirm
+                                                   Confirm Order
                                                </button>
                                            )}
                                        </div>
                                    </div>
 
                                    <div className="space-y-4">
-                                       {selectedOrder.items.map((item, idx) => (
-                                           <div key={idx} className="flex gap-4 p-4 bg-slate-950 rounded-xl border border-slate-800">
-                                               <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-16 h-16 rounded-lg object-cover bg-slate-800" />
-                                               <div className="flex-1">
-                                                   <h4 className="font-bold text-white">{item.product.title}</h4>
-                                                   <p className="text-xs text-slate-500">Qty: {item.quantity} • Wt: {item.product.weight}g</p>
-                                                   {item.notes && <p className="text-xs text-amber-500 mt-1">Note: {item.notes}</p>}
+                                       {selectedOrder.items.map((item, idx) => {
+                                           const isItemProcessed = ['confirmed', 'rejected', 'moved'].includes(item.status || '');
+                                           return (
+                                               <div key={idx} className={`flex flex-col sm:flex-row gap-4 p-4 rounded-xl border ${item.status === 'rejected' ? 'bg-red-950/20 border-red-900/50' : 'bg-slate-950 border-slate-800'}`}>
+                                                   <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-16 h-16 rounded-lg object-cover bg-slate-800" />
+                                                   <div className="flex-1">
+                                                       <div className="flex justify-between items-start">
+                                                           <div>
+                                                               <h4 className="font-bold text-white">{item.product.title}</h4>
+                                                               <p className="text-xs text-slate-500">ID: {item.product.id.slice(-6)} • {item.product.category}</p>
+                                                           </div>
+                                                           <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                                                               item.status === 'confirmed' ? 'bg-green-500/20 text-green-400' :
+                                                               item.status === 'rejected' ? 'bg-red-500/20 text-red-400' :
+                                                               item.status === 'moved' ? 'bg-purple-500/20 text-purple-400' :
+                                                               'bg-yellow-500/10 text-yellow-500'
+                                                           }`}>
+                                                               {item.status || 'Pending'}
+                                                           </span>
+                                                       </div>
+                                                       <div className="mt-2 text-xs text-slate-400 flex flex-wrap gap-4">
+                                                           <span>Qty: <b>{item.quantity}</b></span>
+                                                           <span>Wt: <b>{item.product.weight}g</b></span>
+                                                           <span>Total: <b>{(item.product.weight * item.quantity).toFixed(2)}g</b></span>
+                                                       </div>
+                                                       {item.notes && <p className="text-xs text-amber-500 mt-2 bg-amber-950/20 p-2 rounded border border-amber-900/50">Note: {item.notes}</p>}
+                                                       {item.rejectionReason && <p className="text-xs text-red-400 mt-2">Reason: {item.rejectionReason}</p>}
+                                                   </div>
+                                                   
+                                                   {/* Item Actions */}
+                                                   <div className="flex sm:flex-col gap-2 justify-center border-t sm:border-t-0 sm:border-l border-slate-800 pt-3 sm:pt-0 sm:pl-4">
+                                                       <button 
+                                                           onClick={() => handleItemAction(item, 'confirm')}
+                                                           className="p-2 bg-slate-800 hover:bg-green-600 text-slate-400 hover:text-white rounded-lg transition"
+                                                           title="Confirm Item"
+                                                       >
+                                                           <CheckCircle size={18} />
+                                                       </button>
+                                                       <button 
+                                                           onClick={() => handleItemAction(item, 'custom')}
+                                                           className="p-2 bg-slate-800 hover:bg-blue-600 text-slate-400 hover:text-white rounded-lg transition"
+                                                           title="Move to Custom Order"
+                                                       >
+                                                           <Wrench size={18} />
+                                                       </button>
+                                                       <button 
+                                                           onClick={() => handleItemAction(item, 'reject')}
+                                                           className="p-2 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white rounded-lg transition"
+                                                           title="Reject Item"
+                                                       >
+                                                           <XCircle size={18} />
+                                                       </button>
+                                                   </div>
                                                </div>
-                                               <div className="text-right">
-                                                   <span className="text-sm font-bold text-white">{(item.product.weight * item.quantity).toFixed(2)}g</span>
-                                               </div>
-                                           </div>
-                                       ))}
+                                           );
+                                       })}
                                    </div>
                                </div>
                            ) : (
-                               <div className="h-full flex items-center justify-center text-slate-500">
-                                   <p>Select an order to view details</p>
+                               <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                                   <Package size={48} className="mb-4 opacity-50" />
+                                   <p>Select an order to process details</p>
                                </div>
                            )}
                        </div>
@@ -546,6 +643,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
        </div>
 
        {/* --- MODALS --- */}
+
+       {/* Reject Modal */}
+       {showRejectModal && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
+                   <h3 className="text-xl font-bold text-white mb-2">Reject Item</h3>
+                   <p className="text-slate-400 text-sm mb-4">Please provide a reason for unavailability.</p>
+                   <textarea 
+                       value={rejectReason}
+                       onChange={e => setRejectReason(e.target.value)}
+                       className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-3 text-white mb-4 outline-none focus:border-red-500"
+                       placeholder="E.g., Out of stock, Discontinued..."
+                   />
+                   <div className="flex gap-2">
+                       <button onClick={() => setShowRejectModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
+                       <button onClick={confirmReject} className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold">Confirm Rejection</button>
+                   </div>
+               </div>
+           </div>
+       )}
+
+       {/* Custom Order Modal */}
+       {showCustomModal && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
+                   <h3 className="text-xl font-bold text-white mb-2">Move to Custom Order</h3>
+                   <div className="space-y-4">
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Requirements</label>
+                           <textarea 
+                               value={customOrderDetails.requirements}
+                               onChange={e => setCustomOrderDetails({...customOrderDetails, requirements: e.target.value})}
+                               className="w-full h-24 bg-slate-800 border border-slate-700 rounded-lg p-3 text-white outline-none focus:border-blue-500"
+                               placeholder="Adjustments needed..."
+                           />
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Est. Delivery Date</label>
+                           <input 
+                               type="date"
+                               value={customOrderDetails.date}
+                               onChange={e => setCustomOrderDetails({...customOrderDetails, date: e.target.value})}
+                               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white outline-none focus:border-blue-500"
+                           />
+                       </div>
+                       <div className="flex gap-2 pt-2">
+                           <button onClick={() => setShowCustomModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
+                           <button onClick={confirmCustomOrder} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold">Create Order</button>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       )}
 
        {/* Move/Category Modal */}
        {showMoveModal && (
