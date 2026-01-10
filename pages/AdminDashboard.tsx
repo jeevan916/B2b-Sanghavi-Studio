@@ -6,7 +6,7 @@ import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, Car
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye, Unlock, Share2, FolderInput, Copy, EyeOff, MoreHorizontal, ArrowRight, XCircle, Wrench
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye, Unlock, Share2, FolderInput, Copy, EyeOff, MoreHorizontal, ArrowRight, XCircle, Wrench, ShieldAlert
 } from 'lucide-react';
 import { ImageViewer } from '../components/ImageViewer';
 
@@ -103,6 +103,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     const interval = setInterval(() => refreshData(true), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // --- HELPERS ---
+  const getViolationUrl = (userId: string) => {
+      const violation = analytics.find(a => a.userId === userId && a.type === 'security_block');
+      return violation?.meta?.violationUrl || 'Unknown Location';
+  };
 
   // --- FILTERS ---
   const folders = useMemo(() => {
@@ -201,6 +207,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const handleGrantAccess = async () => {
       if (!selectedCustomer) return;
       await storeService.grantAccess(selectedCustomer.id, accessDuration);
+      setShowAccessModal(false);
+      refreshData(true);
+  };
+
+  const handleUnblock = async () => {
+      if (!selectedCustomer) return;
+      await storeService.unblockCustomer(selectedCustomer.id);
       setShowAccessModal(false);
       refreshData(true);
   };
@@ -461,8 +474,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                                </thead>
                                <tbody className="divide-y divide-slate-800">
                                    {customers.map(c => (
-                                       <tr key={c.id} className="hover:bg-slate-800/50">
-                                           <td className="p-4 font-medium text-white">{c.name}</td>
+                                       <tr key={c.id} className={`hover:bg-slate-800/50 ${c.isBlocked ? 'bg-red-950/10' : ''}`}>
+                                           <td className="p-4">
+                                               <div className="font-medium text-white">{c.name}</div>
+                                               {c.isBlocked && (
+                                                   <div className="text-[10px] text-red-400 mt-1 flex items-center gap-1">
+                                                       <ShieldAlert size={10} /> Violation Detected
+                                                   </div>
+                                               )}
+                                           </td>
                                            <td className="p-4 font-mono">{c.phone}</td>
                                            <td className="p-4">
                                                {c.isBlocked ? <span className="text-red-400 font-bold flex items-center gap-1"><ShieldCheck size={12}/> BLOCKED</span> :
@@ -764,6 +784,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
            <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
                    <h3 className="text-xl font-bold text-white mb-4">Manage Access: {selectedCustomer.name}</h3>
+                   
+                   {selectedCustomer.isBlocked && (
+                       <div className="mb-6 p-4 bg-red-950/30 border border-red-900/50 rounded-xl">
+                           <div className="flex items-center gap-2 text-red-400 font-bold mb-2">
+                               <ShieldAlert size={18} /> Account Blocked
+                           </div>
+                           <p className="text-xs text-red-300 mb-2">
+                               Reason: {getViolationUrl(selectedCustomer.id) !== 'Unknown Location' ? 'Security Violation' : 'Manual Block'}
+                           </p>
+                           <p className="text-[10px] font-mono text-slate-400 bg-black/40 p-2 rounded truncate">
+                               Location: {getViolationUrl(selectedCustomer.id)}
+                           </p>
+                       </div>
+                   )}
+
                    <div className="space-y-4">
                        <div>
                            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Access Duration</label>
@@ -781,13 +816,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
                        </div>
                        <div className="flex gap-2 pt-4">
                            <button onClick={() => setShowAccessModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
-                           <button onClick={handleGrantAccess} className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold">Grant Access</button>
+                           {selectedCustomer.isBlocked ? (
+                               <button onClick={handleUnblock} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold">Unblock User</button>
+                           ) : (
+                               <button onClick={handleGrantAccess} className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold">Grant Access</button>
+                           )}
                        </div>
-                       <div className="pt-2 border-t border-slate-800">
-                           <button onClick={() => { storeService.blockCustomer(selectedCustomer.id).then(() => { setShowAccessModal(false); refreshData(true); }) }} className="w-full py-3 text-red-400 hover:bg-red-950/30 rounded-xl font-bold flex items-center justify-center gap-2">
-                               <ShieldCheck size={18}/> Block User
-                           </button>
-                       </div>
+                       {!selectedCustomer.isBlocked && (
+                           <div className="pt-2 border-t border-slate-800">
+                               <button onClick={() => { storeService.blockCustomer(selectedCustomer.id).then(() => { setShowAccessModal(false); refreshData(true); }) }} className="w-full py-3 text-red-400 hover:bg-red-950/30 rounded-xl font-bold flex items-center justify-center gap-2">
+                                   <ShieldCheck size={18}/> Block User Manually
+                               </button>
+                           </div>
+                       )}
                    </div>
                </div>
            </div>

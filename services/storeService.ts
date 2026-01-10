@@ -408,7 +408,7 @@ export const storeService = {
       return safeSessionParse<string[]>(KEYS.UNLOCKED_CATS, []);
   },
 
-  logEvent: async (type: AnalyticsEvent['type'], product?: Product, userOverride?: User | null, imageIndex?: number, duration?: number) => {
+  logEvent: async (type: AnalyticsEvent['type'], product?: Product, userOverride?: User | null, imageIndex?: number, duration?: number, metaOverride?: any) => {
     try {
         const user = userOverride || storeService.getCurrentUser();
         const deviceInfo = getDeepDeviceInfo();
@@ -424,7 +424,7 @@ export const storeService = {
             timestamp: new Date().toISOString(),
             imageIndex,
             duration,
-            meta: deviceInfo
+            meta: { ...deviceInfo, ...metaOverride }
         };
         
         await fetch(`${API_BASE}/analytics`, { 
