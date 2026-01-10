@@ -2,11 +2,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { storeService } from '../services/storeService';
-import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus } from '../types';
+import { Product, AnalyticsEvent, User, Order, OrderStatus, DeliveryDetails, CartItem, ItemStatus, AppConfig } from '../types';
 import { 
   Loader2, Settings, Folder, Trash2, Edit2, Plus, Search, 
   Grid, List as ListIcon, Lock, CheckCircle, X, 
-  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye
+  LayoutDashboard, FolderOpen, UserCheck, HardDrive, Database, RefreshCw, TrendingUp, BrainCircuit, MapPin, DollarSign, Smartphone, MessageCircle, Save, AlertTriangle, Package, Truck, Archive, CheckSquare, Clock, ShieldCheck, Key, UserPlus, FileText, ArrowLeft, Printer, Calendar, Eye, Unlock, Share2, FolderInput, Copy, EyeOff, MoreHorizontal
 } from 'lucide-react';
 import { ImageViewer } from '../components/ImageViewer';
 
@@ -23,35 +23,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const [analytics, setAnalytics] = useState<AnalyticsEvent[]>([]);
   const [customers, setCustomers] = useState<User[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [healthInfo, setHealthInfo] = useState<{mode?: string, healthy: boolean}>({healthy: false});
   const [intelligence, setIntelligence] = useState<any>(null);
 
+  // Vault / Files State
   const [selectedFolder, setSelectedFolder] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewStyle, setViewStyle] = useState<'grid' | 'list'>('grid');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [editProduct, setEditProduct] = useState<Product | null>(null);
+  
+  // Vault Actions State
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [moveTarget, setMoveTarget] = useState({ category: '', subCategory: '' });
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Order Management State
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null); // For Master-Detail view
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null); 
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchDetails, setDispatchDetails] = useState<DeliveryDetails>({ mode: 'logistics' });
   const [dispatchLoading, setDispatchLoading] = useState(false);
-  const [isOrderDetailOpen, setIsOrderDetailOpen] = useState(false);
-
-  // Item Discard State
-  const [itemToDiscard, setItemToDiscard] = useState<CartItem | null>(null);
-  const [discardReason, setDiscardReason] = useState('');
-  const [customOrderSpecs, setCustomOrderSpecs] = useState('');
-  const [customOrderDate, setCustomOrderDate] = useState('');
-
+  
   // Customer Management State
   const [showAccessModal, setShowAccessModal] = useState(false);
-  const [showEditCustomerModal, setShowEditCustomerModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<User | null>(null);
-  const [editCustomerData, setEditCustomerData] = useState<Partial<User>>({});
   const [accessDuration, setAccessDuration] = useState(7); // Days
 
   // Image Zoom State
@@ -65,20 +64,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
         setHealthInfo(h);
         
         if (h.healthy) {
-            const [p, a, c, o, intel] = await Promise.all([
+            const [p, a, c, o, intel, conf] = await Promise.all([
               storeService.getProducts(1, 1000, { publicOnly: false }).then(res => res.items), 
               storeService.getAnalytics(),
               storeService.getCustomers(),
               storeService.getOrders(),
-              storeService.getBusinessIntelligence()
+              storeService.getBusinessIntelligence(),
+              storeService.getConfig()
             ]);
             setProducts(p);
             setAnalytics(a);
             setCustomers(c);
             setOrders(o);
             setIntelligence(intel);
+            setConfig(conf);
             
-            // If viewing specific order, refresh it
             if (selectedOrder) {
                 const updated = o.find(ord => ord.id === selectedOrder.id);
                 if (updated) setSelectedOrder(updated);
@@ -97,23 +97,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     return () => clearInterval(interval);
   }, []);
 
+  // --- FILTERS ---
   const folders = useMemo(() => {
       const cats = new Set(products.map(p => p.category));
-      return ['All', 'Private', ...Array.from(cats)];
+      return ['All', ...Array.from(cats)];
   }, [products]);
 
   const filteredProducts = useMemo(() => {
       return products.filter(p => {
-          const matchesFolder = 
-            selectedFolder === 'All' ? true :
-            selectedFolder === 'Private' ? p.isHidden :
-            p.category === selectedFolder;
-          const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.includes(searchQuery);
-          return matchesFolder && matchesSearch;
+          const matchFolder = selectedFolder === 'All' || p.category === selectedFolder;
+          const matchSearch = !searchQuery || p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.id.includes(searchQuery);
+          return matchFolder && matchSearch;
       });
   }, [products, selectedFolder, searchQuery]);
 
-  const recentInquiries = useMemo(() => analytics.filter(e => e.type === 'inquiry').slice(0, 10), [analytics]);
+  // --- VAULT MANAGEMENT ACTIONS ---
+
+  const toggleSelection = (id: string) => {
+      const newSet = new Set(selectedIds);
+      if (newSet.has(id)) newSet.delete(id);
+      else newSet.add(id);
+      setSelectedIds(newSet);
+  };
+
+  const selectAll = () => {
+      if (selectedIds.size === filteredProducts.length) setSelectedIds(new Set());
+      else setSelectedIds(new Set(filteredProducts.map(p => p.id)));
+  };
+
+  const handleBulkDelete = async () => {
+      if (!window.confirm(`Permanently delete ${selectedIds.size} items?`)) return;
+      setActionLoading(true);
+      try {
+          for (const id of selectedIds) {
+              await storeService.deleteProduct(id);
+          }
+          setSelectedIds(new Set());
+          refreshData(true);
+      } catch (e) { alert("Delete failed"); }
+      setActionLoading(false);
+  };
+
+  const handleBulkVisibility = async (hide: boolean) => {
+      setActionLoading(true);
+      try {
+          const itemsToUpdate = products.filter(p => selectedIds.has(p.id));
+          for (const p of itemsToUpdate) {
+              if (p.isHidden !== hide) {
+                  await storeService.updateProduct({ ...p, isHidden: hide });
+              }
+          }
+          setSelectedIds(new Set());
+          refreshData(true);
+      } catch (e) { alert("Update failed"); }
+      setActionLoading(false);
+  };
+
+  const handleBulkMove = async () => {
+      if (!moveTarget.category) return;
+      setActionLoading(true);
+      try {
+          const itemsToUpdate = products.filter(p => selectedIds.has(p.id));
+          for (const p of itemsToUpdate) {
+              await storeService.updateProduct({ 
+                  ...p, 
+                  category: moveTarget.category,
+                  subCategory: moveTarget.subCategory 
+              });
+          }
+          setShowMoveModal(false);
+          setSelectedIds(new Set());
+          refreshData(true);
+      } catch (e) { alert("Move failed"); }
+      setActionLoading(false);
+  };
+
+  const handleSharePrivate = async () => {
+      if (selectedIds.size !== 1) return;
+      const id = Array.from(selectedIds)[0];
+      try {
+          const link = await storeService.createSharedLink(id, 'product');
+          setShareLink(link);
+      } catch (e) { alert("Failed to generate link"); }
+  };
+
+  // --- ORDER ACTIONS ---
+  const handleDispatch = async () => {
+      if (!selectedOrder) return;
+      setDispatchLoading(true);
+      await storeService.updateOrderStatus(selectedOrder.id, 'dispatched', dispatchDetails);
+      setShowDispatchModal(false);
+      setDispatchLoading(false);
+      refreshData(true);
+  };
 
   const handleGrantAccess = async () => {
       if (!selectedCustomer) return;
@@ -122,873 +198,488 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
       refreshData(true);
   };
 
-  const handleSaveCustomerEdit = async () => {
-      if (!selectedCustomer || !editCustomerData) return;
-      try {
-          await storeService.updateCustomerProfile(selectedCustomer.id, editCustomerData);
-          setShowEditCustomerModal(false);
-          refreshData(true);
-      } catch (e) {
-          alert("Failed to update profile.");
-      }
-  };
-
-  const openCustomerEdit = (customer: User) => {
-      setSelectedCustomer(customer);
-      setEditCustomerData({
-          name: customer.name,
-          phone: customer.phone,
-          pincode: customer.pincode,
-          address: customer.address || ''
-      });
-      setShowEditCustomerModal(true);
-  };
-
-  // --- PDF GENERATION ---
-  const getFullUrl = (path: string) => {
-      if (!path) return '';
-      if (path.startsWith('data:') || path.startsWith('http')) return path;
-      return `${window.location.origin}${path.startsWith('/') ? path : `/${path}`}`;
-  };
-
-  const generateOrderPDF = (order: Order) => {
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) return;
-
-        const itemsHtml = order.items.map((item, idx) => `
-            <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${idx + 1}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">
-                    <img src="${getFullUrl(item.product.thumbnails[0] || item.product.images[0])}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" />
-                </td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">
-                    <div style="font-weight: bold;">${item.product.title}</div>
-                    <div style="font-size: 10px; color: #666;">ID: ${item.product.id.slice(-6).toUpperCase()}</div>
-                    <div style="font-size: 10px; color: #666;">Supplier: ${item.product.supplier || 'N/A'}</div>
-                </td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.category}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.quantity}</td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.product.weight}g</td>
-                <td style="padding: 10px; border-bottom: 1px solid #eee;">${(item.product.weight * item.quantity).toFixed(2)}g</td>
-            </tr>
-        `).join('');
-
-        const html = `
-            <html>
-            <head>
-                <title>Order #${order.id.slice(0,8)}</title>
-                <style>
-                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
-                    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #b0773f; padding-bottom: 20px; margin-bottom: 30px; }
-                    .logo { font-size: 24px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
-                    .meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-size: 12px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
-                    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-                    th { text-align: left; padding: 10px; border-bottom: 2px solid #eee; color: #888; text-transform: uppercase; font-size: 10px; }
-                    .totals { margin-top: 30px; text-align: right; font-size: 14px; }
-                    @media print { button { display: none; } }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div class="logo">Sanghavi Jewel Studio</div>
-                    <div>
-                        <div style="font-size: 20px; font-weight: bold;">Order #${order.id.slice(0,8).toUpperCase()}</div>
-                        <div style="font-size: 12px; color: #888;">${new Date(order.createdAt).toLocaleDateString()}</div>
-                    </div>
-                </div>
-                <div class="meta">
-                    <div>
-                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">CUSTOMER</div>
-                        <div>${order.customerName}</div>
-                        <div>${order.customerPhone}</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-weight: bold; color: #888; margin-bottom: 4px;">STATUS</div>
-                        <div style="text-transform: uppercase; font-weight: bold;">${order.status}</div>
-                    </div>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Image</th>
-                            <th>Item Details</th>
-                            <th>Category</th>
-                            <th>Qty</th>
-                            <th>Unit Wt</th>
-                            <th>Total Wt</th>
-                        </tr>
-                    </thead>
-                    <tbody>${itemsHtml}</tbody>
-                </table>
-                <div class="totals">
-                    <p>Total Items: <strong>${order.totalItems}</strong></p>
-                    <p>Total Weight: <strong>${order.totalWeight.toFixed(3)}g</strong></p>
-                </div>
-                <script>window.print();</script>
-            </body>
-            </html>
-        `;
-        printWindow.document.write(html);
-        printWindow.document.close();
-  };
-
-  const generateItemPDF = (item: CartItem) => {
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) return;
-
-        const html = `
-            <html>
-            <head>
-                <title>Item Spec - ${item.product.title}</title>
-                <style>
-                    body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #333; padding: 40px; }
-                    .container { max-width: 800px; margin: 0 auto; border: 1px solid #eee; padding: 40px; }
-                    .header { text-align: center; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }
-                    .logo { font-size: 18px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
-                    .content { display: flex; gap: 40px; align-items: flex-start; }
-                    .image-col { width: 50%; }
-                    .image-col img { width: 100%; border-radius: 8px; border: 1px solid #eee; }
-                    .details-col { width: 50%; }
-                    .label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #888; margin-top: 15px; margin-bottom: 4px; }
-                    .value { font-size: 16px; font-weight: 500; border-bottom: 1px solid #f5f5f5; padding-bottom: 4px; }
-                    .desc { font-size: 13px; line-height: 1.6; color: #555; margin-top: 4px; }
-                    @media print { body { padding: 0; } .container { border: none; } }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <div class="logo">Sanghavi Jewel Studio</div>
-                        <div style="font-size: 12px; color: #888; margin-top: 5px;">Admin Specification Sheet</div>
-                    </div>
-                    <div class="content">
-                        <div class="image-col">
-                            <img src="${getFullUrl(item.product.images[0])}" />
-                        </div>
-                        <div class="details-col">
-                            <div class="label">Product Title</div>
-                            <div class="value">${item.product.title}</div>
-
-                            <div class="label">SKU / ID</div>
-                            <div class="value">#${item.product.id.slice(-6).toUpperCase()}</div>
-
-                            <div class="label">Supplier</div>
-                            <div class="value">${item.product.supplier || 'In-House'}</div>
-
-                            <div class="label">Category</div>
-                            <div class="value">${item.product.category} / ${item.product.subCategory}</div>
-
-                            <div class="label">Weight</div>
-                            <div class="value">${item.product.weight}g</div>
-
-                            <div class="label">Description</div>
-                            <div class="desc">${item.product.description || 'No description available.'}</div>
-                            
-                            <div class="label" style="margin-top: 30px;">Order Details</div>
-                            <div class="value" style="font-size: 14px;">Quantity: ${item.quantity} | Status: ${item.status || 'Pending'}</div>
-                        </div>
-                    </div>
-                </div>
-                <script>window.print();</script>
-            </body>
-            </html>
-        `;
-        printWindow.document.write(html);
-        printWindow.document.close();
-  };
-
-  // --- Order Item Actions ---
-
-  const handleConfirmItem = async (item: CartItem) => {
-      if (!selectedOrder) return;
-      await storeService.updateOrderItemStatus(selectedOrder.id, item.product.id, 'confirmed');
-      refreshData(true);
-  };
-
-  const handleDiscardItem = async () => {
-      if (!selectedOrder || !itemToDiscard || !discardReason) return;
-      
-      const isMoved = discardReason === 'Placed Order as per Requirement';
-      
-      // Update Status in Main Order
-      await storeService.updateOrderItemStatus(
-          selectedOrder.id, 
-          itemToDiscard.product.id, 
-          isMoved ? 'moved' : 'rejected', 
-          discardReason
+  if (loading) {
+      return (
+          <div className="flex flex-col items-center justify-center h-screen bg-slate-950 text-slate-400">
+              <Loader2 className="animate-spin mb-4" size={40} />
+              <p className="font-mono text-sm">INITIALIZING COMMAND CENTER...</p>
+          </div>
       );
-
-      // If moved, create Custom Order entry and Print PDF
-      if (isMoved) {
-          await storeService.moveItemToCustomOrder({
-              originalOrderId: selectedOrder.id,
-              productId: itemToDiscard.product.id,
-              productTitle: itemToDiscard.product.title,
-              productImage: itemToDiscard.product.images[0],
-              customerName: selectedOrder.customerName,
-              requirements: customOrderSpecs,
-              deliveryDate: customOrderDate || new Date().toISOString().split('T')[0]
-          });
-          
-          printCustomOrderJobSheet(itemToDiscard, customOrderSpecs, customOrderDate, selectedOrder.customerName);
-      }
-
-      setItemToDiscard(null);
-      setDiscardReason('');
-      setCustomOrderSpecs('');
-      setCustomOrderDate('');
-      refreshData(true);
-  };
-
-  const printCustomOrderJobSheet = (item: CartItem, specs: string, date: string, customer: string) => {
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) return;
-
-      const html = `
-        <html>
-        <head>
-            <title>Custom Job Sheet - ${item.product.title}</title>
-            <style>
-                body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #333; }
-                .header { text-align: center; border-bottom: 2px solid #b0773f; padding-bottom: 20px; margin-bottom: 40px; }
-                .logo { font-size: 24px; font-weight: bold; color: #b0773f; text-transform: uppercase; letter-spacing: 2px; }
-                .meta { display: flex; justify-content: space-between; margin-bottom: 40px; font-size: 14px; }
-                .content { display: flex; gap: 40px; }
-                .image { width: 40%; }
-                .image img { width: 100%; border: 1px solid #eee; border-radius: 8px; }
-                .details { flex: 1; }
-                .label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #888; margin-bottom: 4px; }
-                .value { font-size: 16px; margin-bottom: 20px; font-weight: 500; }
-                .specs { background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #eee; }
-                .footer { margin-top: 60px; font-size: 10px; color: #aaa; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }
-                @media print { body { padding: 20px; } button { display: none; } }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <div class="logo">Sanghavi Jewel Studio</div>
-                <div>Bespoke Order Worksheet</div>
-            </div>
-            <div class="meta">
-                <div>
-                    <div class="label">Customer</div>
-                    <div class="value">${customer}</div>
-                </div>
-                <div>
-                    <div class="label">Order Ref</div>
-                    <div class="value">#${item.product.id.slice(-6).toUpperCase()}</div>
-                </div>
-                <div>
-                    <div class="label">Due Date</div>
-                    <div class="value">${date}</div>
-                </div>
-            </div>
-            <div class="content">
-                <div class="image">
-                    <img src="${item.product.images[0]}" />
-                </div>
-                <div class="details">
-                    <div class="label">Base Design</div>
-                    <div class="value">${item.product.title}</div>
-                    
-                    <div class="label">Category</div>
-                    <div class="value">${item.product.category} / ${item.product.subCategory}</div>
-
-                    <div class="label">Approx Weight</div>
-                    <div class="value">${item.product.weight}g</div>
-
-                    <div class="specs">
-                        <div class="label">Custom Requirements</div>
-                        <p>${specs.replace(/\n/g, '<br/>')}</p>
-                    </div>
-                </div>
-            </div>
-            <div class="footer">Generated on ${new Date().toLocaleString()} • Sanghavi Admin System</div>
-            <script>window.print();</script>
-        </body>
-        </html>
-      `;
-      
-      printWindow.document.write(html);
-      printWindow.document.close();
-  };
-
-  // --- Order Global Actions ---
-  const updateOrderStatus = async (orderId: string, status: OrderStatus, details?: DeliveryDetails) => {
-      setDispatchLoading(true);
-      try {
-          await storeService.updateOrderStatus(orderId, status, details);
-          await refreshData(true); 
-          setShowDispatchModal(false);
-          setIsOrderDetailOpen(false); // Return to list view on complete dispatch
-      } catch (e) {
-          alert('Failed to update order status');
-      } finally {
-          setDispatchLoading(false);
-      }
-  };
-
-  const getStatusColor = (status: OrderStatus | ItemStatus | undefined) => {
-      switch(status) {
-          case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-          case 'confirmed': return 'bg-blue-100 text-blue-800 border-blue-200';
-          case 'dispatched': return 'bg-green-100 text-green-800 border-green-200';
-          case 'delivered': return 'bg-teal-100 text-teal-800 border-teal-200';
-          case 'cancelled': 
-          case 'rejected': return 'bg-red-100 text-red-800 border-red-200';
-          case 'moved': return 'bg-purple-100 text-purple-800 border-purple-200';
-          case 'asked_for': return 'bg-orange-100 text-orange-800 border-orange-200';
-          default: return 'bg-stone-100 text-stone-800';
-      }
-  };
-
-  if (loading && products.length === 0) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-stone-50">
-        <Loader2 className="animate-spin text-gold-500 mb-4" size={32} />
-        <p className="text-stone-400 text-xs uppercase tracking-widest">Connecting to Vault...</p>
-      </div>
-    );
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-8 md:pt-24 pb-24 min-h-screen flex flex-col">
-      <header className="flex-none mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex justify-between items-start w-full md:w-auto">
-           <div>
-              <h2 className="font-serif text-3xl text-stone-900">Vault Administration</h2>
-              <div className="flex items-center gap-2 mt-1">
-                 <div className={`w-2 h-2 rounded-full ${healthInfo.healthy ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
-                 <p className="text-stone-500 text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
-                    {healthInfo.healthy ? 'Live SQL Synchronized' : 'DB Disconnected - Retrying...'}
-                    {isSyncing && <RefreshCw size={10} className="animate-spin text-gold-500" />}
-                 </p>
-                 {!healthInfo.healthy && (
-                     <button onClick={() => refreshData()} className="ml-2 text-[10px] text-red-500 hover:text-red-700 font-bold underline flex items-center gap-1">
-                         <RefreshCw size={10} /> Force Reconnect
-                     </button>
-                 )}
-              </div>
+    <div className="min-h-screen bg-slate-950 text-slate-200 pb-20 md:pl-20">
+       {/* Sidebar / Navigation would be handled by parent layout or assumed here */}
+       <div className="p-6">
+           <div className="flex justify-between items-center mb-8">
+               <div>
+                   <h1 className="text-2xl font-bold text-white mb-1">Command Center</h1>
+                   <p className="text-xs text-slate-500 font-mono uppercase">System Status: {healthInfo.healthy ? 'ONLINE' : 'OFFLINE'} • Sync: {isSyncing ? 'Active' : 'Idle'}</p>
+               </div>
+               <div className="flex gap-2">
+                   <button onClick={() => refreshData()} className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition"><RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} /></button>
+                   <button onClick={() => navigate('/admin/settings')} className="p-2 bg-slate-800 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition"><Settings size={18} /></button>
+               </div>
            </div>
-        </div>
-        
-        <div className="flex bg-stone-100 p-1 rounded-xl items-center overflow-x-auto scrollbar-hide">
-            {[
-              { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
-              { id: 'orders', icon: Package, label: 'Orders' },
-              { id: 'files', icon: FolderOpen, label: 'Assets' },
-              { id: 'leads', icon: UserCheck, label: 'Leads' },
-              { id: 'trends', icon: TrendingUp, label: 'Trends' },
-              { id: 'intelligence', icon: BrainCircuit, label: 'AI Intel' },
-            ].map(tab => (
-              <button 
-                key={tab.id}
-                onClick={() => { setActiveView(tab.id as ViewMode); setIsOrderDetailOpen(false); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${activeView === tab.id ? 'bg-white shadow text-stone-900' : 'text-stone-500 hover:text-stone-700'}`}
-              >
-                  <tab.icon size={16} /> {tab.label}
-              </button>
-            ))}
-            <button onClick={() => onNavigate?.('settings')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-stone-500 hover:text-stone-700 transition-all whitespace-nowrap">
-                <Settings size={16} /> Settings
-            </button>
-        </div>
-      </header>
 
-      {!healthInfo.healthy && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700">
-              <AlertTriangle size={20} />
-              <div>
-                  <p className="font-bold text-sm">Connection Lost</p>
-                  <p className="text-xs">The application cannot reach the MySQL database. We are attempting to reconnect automatically. If this persists, please check your network or server logs.</p>
-              </div>
-          </div>
-      )}
+           {/* View Tabs */}
+           <div className="flex gap-4 mb-8 overflow-x-auto pb-2 border-b border-slate-800">
+               {[
+                   { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
+                   { id: 'orders', icon: Package, label: 'Orders' },
+                   { id: 'files', icon: HardDrive, label: 'Vault' },
+                   { id: 'leads', icon: UserCheck, label: 'Clients' },
+                   { id: 'intelligence', icon: BrainCircuit, label: 'Intel' }
+               ].map(tab => (
+                   <button 
+                       key={tab.id}
+                       onClick={() => setActiveView(tab.id as ViewMode)}
+                       className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors ${activeView === tab.id ? 'bg-teal-500/10 text-teal-500' : 'text-slate-500 hover:text-slate-300'}`}
+                   >
+                       <tab.icon size={16} /> {tab.label}
+                   </button>
+               ))}
+           </div>
 
-      {/* OVERVIEW */}
-      {activeView === 'overview' && (
-          <div className="flex-1 space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-4">
-                    <div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><Package size={24} /></div>
-                    <div><p className="text-stone-500 text-[10px] font-bold uppercase tracking-widest">Active Orders</p><p className="text-2xl font-bold text-stone-800">{orders.filter(o => o.status !== 'cancelled').length}</p></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-4">
-                    <div className="p-3 bg-purple-50 text-purple-600 rounded-xl"><HardDrive size={24} /></div>
-                    <div><p className="text-stone-500 text-[10px] font-bold uppercase tracking-widest">Inventory</p><p className="text-2xl font-bold text-stone-800">{products.length}</p></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-4">
-                    <div className="p-3 bg-green-50 text-green-600 rounded-xl"><UserCheck size={24} /></div>
-                    <div><p className="text-stone-500 text-[10px] font-bold uppercase tracking-widest">Leads</p><p className="text-2xl font-bold text-stone-800">{customers.length}</p></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-100 flex items-center gap-4">
-                    <div className="p-3 bg-gold-50 text-gold-600 rounded-xl"><TrendingUp size={24} /></div>
-                    <div><p className="text-stone-500 text-[10px] font-bold uppercase tracking-widest">Inquiries</p><p className="text-2xl font-bold text-stone-800">{recentInquiries.length}</p></div>
-                </div>
-            </div>
-          </div>
-      )}
+           {/* CONTENT AREA */}
+           <div className="animate-in fade-in slide-in-from-bottom-4">
+               
+               {/* OVERVIEW */}
+               {activeView === 'overview' && (
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <div className="flex justify-between items-start mb-4">
+                               <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500"><Package size={24}/></div>
+                               <span className="text-xs font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded">PENDING</span>
+                           </div>
+                           <h3 className="text-3xl font-bold text-white mb-1">{orders.filter(o => o.status === 'pending').length}</h3>
+                           <p className="text-xs text-slate-500">New Orders</p>
+                       </div>
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <div className="flex justify-between items-start mb-4">
+                               <div className="p-3 bg-teal-500/10 rounded-xl text-teal-500"><UserCheck size={24}/></div>
+                               <span className="text-xs font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded">ACTIVE</span>
+                           </div>
+                           <h3 className="text-3xl font-bold text-white mb-1">{customers.length}</h3>
+                           <p className="text-xs text-slate-500">Registered Clients</p>
+                       </div>
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <div className="flex justify-between items-start mb-4">
+                               <div className="p-3 bg-purple-500/10 rounded-xl text-purple-500"><TrendingUp size={24}/></div>
+                               <span className="text-xs font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded">VIEWS</span>
+                           </div>
+                           <h3 className="text-3xl font-bold text-white mb-1">{analytics.filter(a => a.type === 'view').length}</h3>
+                           <p className="text-xs text-slate-500">Catalog Interactions</p>
+                       </div>
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <div className="flex justify-between items-start mb-4">
+                               <div className="p-3 bg-amber-500/10 rounded-xl text-amber-500"><HardDrive size={24}/></div>
+                               <span className="text-xs font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded">ASSETS</span>
+                           </div>
+                           <h3 className="text-3xl font-bold text-white mb-1">{products.length}</h3>
+                           <p className="text-xs text-slate-500">Vault Items</p>
+                       </div>
+                   </div>
+               )}
 
-      {/* ORDERS VIEW */}
-      {activeView === 'orders' && (
-          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
-              {isOrderDetailOpen && selectedOrder ? (
-                  // ORDER DETAIL VIEW
-                  <div className="flex flex-col h-full">
-                      <div className="p-6 bg-stone-50 border-b border-stone-200 flex justify-between items-start">
-                          <div>
-                              <button onClick={() => setIsOrderDetailOpen(false)} className="flex items-center gap-2 text-stone-500 hover:text-stone-900 mb-2 text-xs font-bold uppercase tracking-widest">
-                                  <ArrowLeft size={16} /> Back to List
-                              </button>
-                              <div className="flex items-center gap-4">
-                                  <h3 className="font-serif text-2xl text-stone-800 font-bold flex items-center gap-3">
-                                      Order #{selectedOrder.id.slice(0,8).toUpperCase()}
-                                      <span className={`px-3 py-1 rounded-full text-xs border font-sans ${getStatusColor(selectedOrder.status)}`}>{selectedOrder.status}</span>
-                                  </h3>
-                                  <button onClick={() => generateOrderPDF(selectedOrder)} className="text-gold-600 hover:underline text-xs font-bold uppercase flex items-center gap-1">
-                                      <Printer size={14}/> Download PDF
-                                  </button>
-                              </div>
-                              <p className="text-stone-500 text-sm mt-1">{selectedOrder.customerName} • +{selectedOrder.customerPhone} • {new Date(selectedOrder.createdAt).toLocaleString()}</p>
-                          </div>
-                          
-                          <div className="flex gap-2">
-                              {selectedOrder.status !== 'dispatched' && selectedOrder.status !== 'delivered' && (
-                                  <button onClick={() => setShowDispatchModal(true)} className="bg-stone-900 text-white px-6 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition shadow-lg">
-                                      <Truck size={18} /> Dispatch Order
-                                  </button>
-                              )}
-                          </div>
-                      </div>
+               {/* FILES / VAULT */}
+               {activeView === 'files' && (
+                   <div className="space-y-6">
+                       {/* Toolbar */}
+                       <div className="flex gap-4 items-center bg-slate-900 p-4 rounded-xl border border-slate-800 flex-wrap">
+                           <div className="relative flex-1 min-w-[200px]">
+                               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                               <input 
+                                   type="text" 
+                                   placeholder="Search vault..." 
+                                   value={searchQuery}
+                                   onChange={(e) => setSearchQuery(e.target.value)}
+                                   className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:border-teal-500 outline-none"
+                               />
+                           </div>
+                           <select 
+                               value={selectedFolder}
+                               onChange={(e) => setSelectedFolder(e.target.value)}
+                               className="bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-white focus:border-teal-500 outline-none"
+                           >
+                               {folders.map(f => <option key={f} value={f}>{f}</option>)}
+                           </select>
+                           <button onClick={selectAll} className="p-2 text-slate-400 hover:text-white border border-slate-800 rounded-lg" title="Select All">
+                               <CheckSquare size={20} className={selectedIds.size === filteredProducts.length ? 'text-teal-500' : ''}/>
+                           </button>
+                           <button onClick={() => setViewStyle(viewStyle === 'grid' ? 'list' : 'grid')} className="p-2 text-slate-400 hover:text-white border border-slate-800 rounded-lg">
+                               {viewStyle === 'grid' ? <ListIcon size={20} /> : <Grid size={20} />}
+                           </button>
+                           <button onClick={() => navigate('/admin/upload')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+                               <Plus size={16} /> Upload
+                           </button>
+                       </div>
 
-                      <div className="flex-1 overflow-y-auto p-6">
-                          <div className="grid grid-cols-1 gap-4">
-                              {selectedOrder.items.map((item, idx) => (
-                                  <div key={idx} className="flex flex-col md:flex-row gap-4 p-4 border border-stone-100 rounded-xl hover:shadow-md transition-shadow bg-white">
-                                      {/* Larger Clickable Image */}
-                                      <div 
-                                          className="w-full md:w-32 h-32 bg-stone-100 rounded-lg overflow-hidden shrink-0 relative group cursor-zoom-in border border-stone-200"
-                                          onClick={() => setZoomImage(getFullUrl(item.product.images[0]))}
-                                      >
-                                          <img src={getFullUrl(item.product.thumbnails[0] || item.product.images[0])} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 flex items-center justify-center transition-colors">
-                                              <Eye className="text-white opacity-0 group-hover:opacity-100 drop-shadow-md" size={24}/>
-                                          </div>
-                                      </div>
+                       {/* Products Grid/List */}
+                       <div className={viewStyle === 'grid' ? "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 pb-24" : "space-y-2 pb-24"}>
+                           {filteredProducts.map(product => {
+                               const isSelected = selectedIds.has(product.id);
+                               return (
+                                   <div 
+                                      key={product.id} 
+                                      onClick={() => toggleSelection(product.id)}
+                                      className={`
+                                        bg-slate-900 border rounded-xl overflow-hidden group transition-all cursor-pointer relative
+                                        ${isSelected ? 'border-teal-500 ring-1 ring-teal-500' : 'border-slate-800 hover:border-slate-600'}
+                                        ${viewStyle === 'list' ? 'flex items-center gap-4 p-2' : ''}
+                                      `}
+                                   >
+                                       {/* Selection Indicator */}
+                                       <div className={`absolute top-2 right-2 z-10 w-5 h-5 rounded-full border border-white/50 flex items-center justify-center transition-colors ${isSelected ? 'bg-teal-500 border-teal-500' : 'bg-black/40'}`}>
+                                           {isSelected && <CheckCircle size={14} className="text-white" />}
+                                       </div>
 
-                                      <div className="flex-1 min-w-0">
-                                          <div className="flex justify-between items-start">
-                                              <div>
-                                                  <h4 className="font-bold text-stone-800 text-lg">{item.product.title}</h4>
-                                                  <p className="text-xs text-stone-500 font-mono">#{item.product.id.slice(-6).toUpperCase()}</p>
+                                       <div className={`${viewStyle === 'grid' ? 'aspect-square w-full' : 'w-12 h-12 shrink-0'} bg-slate-950 relative`}>
+                                           <img src={product.thumbnails[0] || product.images[0]} className="w-full h-full object-cover" />
+                                           {product.isHidden && (
+                                              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                                                  <EyeOff className="text-red-400" size={24}/>
                                               </div>
-                                              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusColor(item.status || 'pending')}`}>
-                                                  {item.status === 'asked_for' ? 'Waitlist' : (item.status || 'Pending')}
-                                              </span>
-                                          </div>
-                                          
-                                          <div className="flex flex-wrap gap-4 mt-2 text-sm text-stone-600">
-                                              <span>Qty: <b>{item.quantity}</b></span>
-                                              <span>Weight: <b>{item.product.weight}g</b></span>
-                                              <span>Supplier: <b>{item.product.supplier || 'N/A'}</b></span>
-                                              {item.notes && <span className="bg-yellow-50 px-2 rounded text-yellow-700 border border-yellow-100">Note: {item.notes}</span>}
-                                          </div>
+                                           )}
+                                       </div>
+                                       
+                                       <div className={`p-3 ${viewStyle === 'list' ? 'flex-1 flex justify-between items-center' : ''}`}>
+                                           <div>
+                                               <h4 className="text-sm font-bold text-slate-200 truncate">{product.title}</h4>
+                                               <p className="text-[10px] text-slate-500 font-mono">{product.category} • {product.weight}g</p>
+                                           </div>
+                                       </div>
+                                   </div>
+                               );
+                           })}
+                       </div>
 
-                                          {item.rejectionReason && (
-                                              <p className="mt-2 text-xs text-red-500 font-bold bg-red-50 p-2 rounded">Reason: {item.rejectionReason}</p>
-                                          )}
-                                          
-                                          <div className="mt-3">
-                                              <button onClick={() => generateItemPDF(item)} className="text-[10px] font-bold uppercase text-stone-400 hover:text-gold-600 flex items-center gap-1">
-                                                  <Printer size={12}/> Spec Sheet
-                                              </button>
-                                          </div>
-                                      </div>
+                       {/* Batch Actions Bar - Floating Bottom */}
+                       {selectedIds.size > 0 && (
+                           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl border border-slate-700 flex items-center gap-4 z-40 animate-in slide-in-from-bottom-10">
+                               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider border-r border-slate-600 pr-4">{selectedIds.size} Selected</span>
+                               
+                               <button onClick={() => setShowMoveModal(true)} className="flex flex-col items-center gap-1 group">
+                                   <div className="p-2 bg-slate-700 rounded-full group-hover:bg-blue-600 transition"><FolderInput size={18}/></div>
+                                   <span className="text-[9px] uppercase font-bold text-slate-400 group-hover:text-white">Move</span>
+                               </button>
 
-                                      <div className="flex md:flex-col gap-2 justify-end md:justify-center border-t md:border-t-0 md:border-l border-stone-100 pt-4 md:pt-0 md:pl-4">
-                                          {(!item.status || item.status === 'pending' || item.status === 'asked_for') && (
-                                              <>
-                                                  <button onClick={() => handleConfirmItem(item)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Confirm Item">
-                                                      <CheckCircle size={20} />
-                                                  </button>
-                                                  <button onClick={() => setItemToDiscard(item)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" title="Discard/Reject">
-                                                      <X size={20} />
-                                                  </button>
-                                              </>
-                                          )}
-                                          {item.status === 'moved' && (
-                                              <button onClick={() => {}} className="p-2 bg-purple-50 text-purple-600 rounded-lg" title="Moved to Custom Order" disabled>
-                                                  <FileText size={20} />
-                                              </button>
-                                          )}
-                                      </div>
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-              ) : (
-                  // ORDER LIST VIEW
-                  <>
-                    <div className="p-6 bg-stone-50 border-b border-stone-200 flex justify-between items-center">
-                        <div>
-                            <h3 className="font-serif text-2xl text-stone-800 flex items-center gap-2"><Package className="text-gold-600" /> Order Management</h3>
-                            <p className="text-stone-500 text-sm mt-1">Track, confirm, and dispatch B2B orders.</p>
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="bg-stone-50 text-stone-500 uppercase text-[10px] font-bold tracking-[0.2em] border-b border-stone-200">
-                                <tr>
-                                    <th className="p-4">ID & Date</th>
-                                    <th className="p-4">Customer</th>
-                                    <th className="p-4">Summary</th>
-                                    <th className="p-4">Status</th>
-                                    <th className="p-4 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-stone-100">
-                                {orders.map(order => (
-                                    <tr key={order.id} className="hover:bg-stone-50 transition-colors cursor-pointer" onClick={() => { setSelectedOrder(order); setIsOrderDetailOpen(true); }}>
-                                        <td className="p-4">
-                                            <p className="font-mono font-bold text-stone-700">#{order.id.slice(0,6)}</p>
-                                            <p className="text-xs text-stone-400">{new Date(order.createdAt).toLocaleDateString()}</p>
-                                        </td>
-                                        <td className="p-4">
-                                            <p className="font-bold text-stone-800">{order.customerName}</p>
-                                            <p className="text-xs text-stone-500">{order.customerPhone}</p>
-                                        </td>
-                                        <td className="p-4">
-                                            <p className="text-stone-800 font-medium">{order.totalItems} Items</p>
-                                            <p className="text-xs text-stone-500">{order.totalWeight}g Total</p>
-                                        </td>
-                                        <td className="p-4">
-                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(order.status)}`}>
-                                                {order.status}
-                                            </span>
-                                        </td>
-                                        <td className="p-4 text-right flex items-center justify-end gap-2">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); generateOrderPDF(order); }}
-                                                className="p-2 text-stone-400 hover:text-stone-800 rounded-lg hover:bg-stone-100"
-                                                title="Print PDF"
-                                            >
-                                                <Printer size={16} />
-                                            </button>
-                                            <button className="text-gold-600 font-bold text-xs uppercase tracking-wider hover:underline">View Details</button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                  </>
-              )}
-          </div>
-      )}
+                               <button onClick={() => handleBulkVisibility(true)} className="flex flex-col items-center gap-1 group">
+                                   <div className="p-2 bg-slate-700 rounded-full group-hover:bg-slate-600 transition"><EyeOff size={18}/></div>
+                                   <span className="text-[9px] uppercase font-bold text-slate-400 group-hover:text-white">Hide</span>
+                               </button>
 
-      {/* LEADS VIEW - kept as is */}
-      {activeView === 'leads' && (
-          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden flex flex-col">
-              <div className="p-6 bg-stone-50 border-b border-stone-200">
-                  <h3 className="font-serif text-2xl text-stone-800 flex items-center gap-2"><UserCheck className="text-gold-600" /> B2B Access Control</h3>
-                  <p className="text-stone-500 text-sm mt-1">Manage catalog access duration and verify new accounts.</p>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                  <table className="w-full text-sm text-left">
-                      <thead className="bg-stone-50 text-stone-500 uppercase text-[10px] font-bold tracking-[0.2em] border-b border-stone-200">
-                          <tr>
-                              <th className="p-6">Profile</th>
-                              <th className="p-6">Contact</th>
-                              <th className="p-6">Access Status</th>
-                              <th className="p-6 text-right">Actions</th>
-                          </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-100">
-                          {customers.map(customer => {
-                              const isExpired = customer.accessExpiresAt && new Date(customer.accessExpiresAt) < new Date();
-                              return (
-                                  <tr key={customer.id} className="hover:bg-gold-50/20">
-                                      <td className="p-6 flex items-center gap-4">
-                                          <div className="w-10 h-10 bg-gold-100 rounded-full flex items-center justify-center font-bold text-gold-700 text-lg">{customer.name.charAt(0)}</div>
-                                          <div>
-                                              <p className="font-bold text-stone-800">{customer.name}</p>
-                                              <p className="text-xs text-stone-400">{customer.pincode || 'No Location'}</p>
-                                          </div>
-                                      </td>
-                                      <td className="p-6 font-mono text-stone-600">+{customer.phone}</td>
-                                      <td className="p-6">
-                                          {!customer.isVerified ? (
-                                              <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border border-yellow-200">Pending</span>
-                                          ) : isExpired ? (
-                                              <div className="flex flex-col gap-1">
-                                                  <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border border-red-200 w-fit">Expired</span>
-                                                  <span className="text-[10px] text-stone-400">Ended {new Date(customer.accessExpiresAt!).toLocaleDateString()}</span>
-                                              </div>
-                                          ) : (
-                                              <div className="flex flex-col gap-1">
-                                                  <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest border border-green-200 w-fit">Active</span>
-                                                  <span className="text-[10px] text-stone-400">Valid until {new Date(customer.accessExpiresAt!).toLocaleDateString()}</span>
-                                              </div>
-                                          )}
-                                      </td>
-                                      <td className="p-6 text-right flex gap-2 justify-end">
-                                          <button onClick={() => openCustomerEdit(customer)} className="p-2 text-stone-400 hover:text-stone-600 rounded-full hover:bg-stone-100 transition" title="Edit Profile">
-                                              <Edit2 size={16} />
-                                          </button>
-                                          <button onClick={() => storeService.chatWithLead(customer)} className="text-stone-400 hover:text-green-600 p-2 rounded-full hover:bg-green-50 transition" title="Chat on WhatsApp">
-                                              <MessageCircle size={18} />
-                                          </button>
-                                          <button 
-                                              onClick={() => { setSelectedCustomer(customer); setShowAccessModal(true); }} 
-                                              className="bg-stone-900 text-white px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-gold-600 transition flex items-center gap-2"
-                                          >
-                                              <ShieldCheck size={14} /> {customer.isVerified ? 'Renew' : 'Approve'}
-                                          </button>
-                                      </td>
-                                  </tr>
-                              );
-                          })}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-      )}
+                               <button onClick={() => handleBulkVisibility(false)} className="flex flex-col items-center gap-1 group">
+                                   <div className="p-2 bg-slate-700 rounded-full group-hover:bg-slate-600 transition"><Eye size={18}/></div>
+                                   <span className="text-[9px] uppercase font-bold text-slate-400 group-hover:text-white">Unhide</span>
+                               </button>
 
-      {/* Discard Item Modal */}
-      {itemToDiscard && (
-          <div className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-in zoom-in-95">
-                  <div className="p-6 bg-red-50 border-b border-red-100">
-                      <h3 className="font-serif text-xl font-bold text-red-800">Reject Item</h3>
-                      <p className="text-xs text-red-500 mt-1">Select reason for discarding this item.</p>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      {['Not Available', 'Order Specifications Rejected', 'Placed Order as per Requirement'].map(reason => (
-                          <label key={reason} className="flex items-center gap-3 p-3 border border-stone-200 rounded-xl cursor-pointer hover:bg-stone-50 transition">
-                              <input 
-                                  type="radio" 
-                                  name="discardReason" 
-                                  checked={discardReason === reason} 
-                                  onChange={() => setDiscardReason(reason)}
-                                  className="accent-red-600 w-4 h-4"
-                              />
-                              <span className="text-sm font-medium text-stone-700">{reason}</span>
-                          </label>
-                      ))}
+                               <button onClick={handleBulkDelete} className="flex flex-col items-center gap-1 group">
+                                   <div className="p-2 bg-slate-700 rounded-full group-hover:bg-red-600 transition"><Trash2 size={18}/></div>
+                                   <span className="text-[9px] uppercase font-bold text-slate-400 group-hover:text-white">Delete</span>
+                               </button>
 
-                      {discardReason === 'Placed Order as per Requirement' && (
-                          <div className="space-y-3 animate-in fade-in slide-in-from-top-2 pt-2">
-                              <div>
-                                  <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Custom Specs</label>
-                                  <textarea 
-                                      value={customOrderSpecs} 
-                                      onChange={e => setCustomOrderSpecs(e.target.value)}
-                                      className="w-full p-2 border border-stone-200 rounded-lg text-sm h-20"
-                                      placeholder="Enter requirements..."
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold uppercase tracking-widest text-stone-400">Delivery Date</label>
-                                  <input 
-                                      type="date"
-                                      value={customOrderDate}
-                                      onChange={e => setCustomOrderDate(e.target.value)}
-                                      className="w-full p-2 border border-stone-200 rounded-lg text-sm"
-                                  />
-                              </div>
-                              <div className="p-3 bg-blue-50 text-blue-700 text-xs rounded-lg border border-blue-100 flex items-center gap-2">
-                                  <Printer size={16} /> 
-                                  <span>Job Sheet PDF will generate automatically.</span>
-                              </div>
-                          </div>
-                      )}
-                  </div>
-                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
-                      <button onClick={() => setItemToDiscard(null)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
-                      <button 
-                          onClick={handleDiscardItem}
-                          disabled={!discardReason || (discardReason === 'Placed Order as per Requirement' && (!customOrderSpecs || !customOrderDate))} 
-                          className="px-6 py-2 bg-red-600 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-700 transition disabled:opacity-50"
-                      >
-                          Confirm Rejection
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+                               {selectedIds.size === 1 && (
+                                   <div className="border-l border-slate-600 pl-4 ml-2">
+                                       <button onClick={handleSharePrivate} className="flex flex-col items-center gap-1 group">
+                                           <div className="p-2 bg-slate-700 rounded-full group-hover:bg-gold-600 transition"><Share2 size={18}/></div>
+                                           <span className="text-[9px] uppercase font-bold text-slate-400 group-hover:text-white">Share</span>
+                                       </button>
+                                   </div>
+                               )}
+                           </div>
+                       )}
+                   </div>
+               )}
 
-      {/* Edit Customer Profile Modal - kept as is */}
-      {showEditCustomerModal && selectedCustomer && (
-          <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95">
-                  <div className="p-6 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
-                      <h3 className="font-serif text-xl font-bold text-stone-800">Edit Customer Profile</h3>
-                      <button onClick={() => setShowEditCustomerModal(false)}><X size={20} className="text-stone-400" /></button>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Full Name</label>
-                          <input 
-                              value={editCustomerData.name || ''} 
-                              onChange={e => setEditCustomerData({...editCustomerData, name: e.target.value})}
-                              className="w-full p-3 border border-stone-200 rounded-xl text-sm"
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">WhatsApp Number</label>
-                          <input 
-                              value={editCustomerData.phone || ''} 
-                              onChange={e => setEditCustomerData({...editCustomerData, phone: e.target.value})}
-                              className="w-full p-3 border border-stone-200 rounded-xl text-sm font-mono"
-                          />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Pincode</label>
-                              <input 
-                                  value={editCustomerData.pincode || ''} 
-                                  onChange={e => setEditCustomerData({...editCustomerData, pincode: e.target.value})}
-                                  className="w-full p-3 border border-stone-200 rounded-xl text-sm"
-                              />
-                          </div>
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Full Address</label>
-                          <textarea 
-                              value={editCustomerData.address || ''} 
-                              onChange={e => setEditCustomerData({...editCustomerData, address: e.target.value})}
-                              className="w-full p-3 border border-stone-200 rounded-xl text-sm h-24"
-                              placeholder="Street, City, State..."
-                          />
-                      </div>
-                  </div>
-                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
-                      <button onClick={() => setShowEditCustomerModal(false)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
-                      <button onClick={handleSaveCustomerEdit} className="px-6 py-2 bg-stone-900 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition">
-                          <Save size={16} /> Save Changes
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+               {/* LEADS / CLIENTS */}
+               {activeView === 'leads' && (
+                   <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                       <div className="overflow-x-auto">
+                           <table className="w-full text-left text-sm text-slate-400">
+                               <thead className="bg-slate-950 uppercase font-bold text-xs tracking-wider">
+                                   <tr>
+                                       <th className="p-4">Client</th>
+                                       <th className="p-4">Contact</th>
+                                       <th className="p-4">Status</th>
+                                       <th className="p-4">Access</th>
+                                       <th className="p-4">Actions</th>
+                                   </tr>
+                               </thead>
+                               <tbody className="divide-y divide-slate-800">
+                                   {customers.map(c => (
+                                       <tr key={c.id} className="hover:bg-slate-800/50">
+                                           <td className="p-4 font-medium text-white">{c.name}</td>
+                                           <td className="p-4 font-mono">{c.phone}</td>
+                                           <td className="p-4">
+                                               {c.isBlocked ? <span className="text-red-400 font-bold flex items-center gap-1"><ShieldCheck size={12}/> BLOCKED</span> :
+                                                c.isVerified ? <span className="text-teal-400 font-bold flex items-center gap-1"><CheckCircle size={12}/> VERIFIED</span> :
+                                                <span className="text-yellow-500 font-bold">PENDING</span>}
+                                           </td>
+                                           <td className="p-4 text-xs">
+                                               {c.accessExpiresAt ? new Date(c.accessExpiresAt).toLocaleDateString() : '-'}
+                                           </td>
+                                           <td className="p-4">
+                                               <button 
+                                                   onClick={() => { setSelectedCustomer(c); setShowAccessModal(true); }}
+                                                   className="px-3 py-1 bg-teal-500/10 text-teal-500 rounded hover:bg-teal-500 hover:text-white transition text-xs font-bold uppercase"
+                                               >
+                                                   Manage
+                                               </button>
+                                           </td>
+                                       </tr>
+                                   ))}
+                               </tbody>
+                           </table>
+                       </div>
+                   </div>
+               )}
 
-      {/* Grant Access Modal - kept as is */}
-      {showAccessModal && selectedCustomer && (
-          <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-in zoom-in-95">
-                  <div className="p-6 bg-stone-50 border-b border-stone-100">
-                      <h3 className="font-serif text-xl font-bold text-stone-800">Grant Catalog Access</h3>
-                      <p className="text-xs text-stone-500 mt-1">For: {selectedCustomer.name}</p>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-2">Access Duration</label>
-                          <div className="grid grid-cols-3 gap-2">
-                              {[3, 7, 14, 30, 60, 90].map(days => (
-                                  <button 
-                                    key={days} 
-                                    onClick={() => setAccessDuration(days)}
-                                    className={`py-2 rounded-lg text-xs font-bold transition-all ${accessDuration === days ? 'bg-gold-600 text-white' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'}`}
-                                  >
-                                      {days} Days
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
-                      <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-800 flex items-start gap-2">
-                          <Clock size={16} className="shrink-0 mt-0.5" />
-                          <p>User will have full access to browse and order. After expiry, they can only view previously purchased items.</p>
-                      </div>
-                  </div>
-                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
-                      <button onClick={() => setShowAccessModal(false)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
-                      <button onClick={handleGrantAccess} className="px-6 py-2 bg-stone-900 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition">
-                          <Key size={16} /> Grant Access
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+               {/* ORDERS */}
+               {activeView === 'orders' && (
+                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                       {/* Order List */}
+                       <div className="lg:col-span-1 space-y-4">
+                           {orders.map(order => (
+                               <div 
+                                   key={order.id} 
+                                   onClick={() => setSelectedOrder(order)}
+                                   className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedOrder?.id === order.id ? 'bg-teal-500/10 border-teal-500/50' : 'bg-slate-900 border-slate-800 hover:border-slate-700'}`}
+                               >
+                                   <div className="flex justify-between items-start mb-2">
+                                       <span className="font-mono text-xs text-slate-500">#{order.id.slice(0,6)}</span>
+                                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${order.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-green-500/10 text-green-500'}`}>{order.status}</span>
+                                   </div>
+                                   <h4 className="font-bold text-white">{order.customerName}</h4>
+                                   <p className="text-xs text-slate-400">{order.totalItems} Items • {new Date(order.createdAt).toLocaleDateString()}</p>
+                               </div>
+                           ))}
+                       </div>
+                       
+                       {/* Order Detail View */}
+                       <div className="lg:col-span-2 bg-slate-900 rounded-2xl border border-slate-800 p-6 min-h-[500px]">
+                           {selectedOrder ? (
+                               <div className="space-y-6">
+                                   <div className="flex justify-between items-center pb-6 border-b border-slate-800">
+                                       <div>
+                                           <h2 className="text-xl font-bold text-white">Order #{selectedOrder.id.slice(0,8)}</h2>
+                                           <p className="text-sm text-slate-400">{selectedOrder.customerName} • {selectedOrder.customerPhone}</p>
+                                       </div>
+                                       <div className="flex gap-2">
+                                           {selectedOrder.status !== 'dispatched' && selectedOrder.status !== 'delivered' && (
+                                               <button onClick={() => setShowDispatchModal(true)} className="px-4 py-2 bg-teal-600 text-white rounded-lg font-bold text-sm hover:bg-teal-500 transition">
+                                                   Dispatch
+                                               </button>
+                                           )}
+                                            {selectedOrder.status === 'pending' && (
+                                               <button onClick={() => storeService.updateOrderStatus(selectedOrder.id, 'confirmed').then(() => refreshData(true))} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-500 transition">
+                                                   Confirm
+                                               </button>
+                                           )}
+                                       </div>
+                                   </div>
 
-      {/* DISPATCH MODAL */}
-      {showDispatchModal && selectedOrder && (
-          <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95">
-                  <div className="p-6 bg-stone-50 border-b border-stone-100">
-                      <h3 className="font-serif text-xl font-bold text-stone-800">Dispatch Order</h3>
-                      <p className="text-xs text-stone-500 mt-1">Order #{selectedOrder.id.slice(0,8)}</p>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Delivery Mode</label>
-                          <select 
-                             value={dispatchDetails.mode} 
-                             onChange={e => setDispatchDetails({...dispatchDetails, mode: e.target.value as any})}
-                             className="w-full p-3 border border-stone-200 rounded-xl text-sm"
-                          >
-                              <option value="logistics">Courier / Logistics</option>
-                              <option value="hand_to_hand">Hand-to-Hand Delivery</option>
-                              <option value="vpp">VPP (Value Payable Post)</option>
-                          </select>
-                      </div>
+                                   <div className="space-y-4">
+                                       {selectedOrder.items.map((item, idx) => (
+                                           <div key={idx} className="flex gap-4 p-4 bg-slate-950 rounded-xl border border-slate-800">
+                                               <img src={item.product.thumbnails[0] || item.product.images[0]} className="w-16 h-16 rounded-lg object-cover bg-slate-800" />
+                                               <div className="flex-1">
+                                                   <h4 className="font-bold text-white">{item.product.title}</h4>
+                                                   <p className="text-xs text-slate-500">Qty: {item.quantity} • Wt: {item.product.weight}g</p>
+                                                   {item.notes && <p className="text-xs text-amber-500 mt-1">Note: {item.notes}</p>}
+                                               </div>
+                                               <div className="text-right">
+                                                   <span className="text-sm font-bold text-white">{(item.product.weight * item.quantity).toFixed(2)}g</span>
+                                               </div>
+                                           </div>
+                                       ))}
+                                   </div>
+                               </div>
+                           ) : (
+                               <div className="h-full flex items-center justify-center text-slate-500">
+                                   <p>Select an order to view details</p>
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               )}
 
-                      {dispatchDetails.mode === 'logistics' && (
-                          <>
-                            <div>
-                                <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Courier Service</label>
-                                <input 
-                                    value={dispatchDetails.courierName || ''}
-                                    onChange={e => setDispatchDetails({...dispatchDetails, courierName: e.target.value})}
-                                    placeholder="e.g. BlueDart, BVC"
-                                    className="w-full p-3 border border-stone-200 rounded-xl text-sm"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Tracking Number / AWB</label>
-                                <input 
-                                    value={dispatchDetails.trackingNumber || ''}
-                                    onChange={e => setDispatchDetails({...dispatchDetails, trackingNumber: e.target.value})}
-                                    placeholder="Tracking ID"
-                                    className="w-full p-3 border border-stone-200 rounded-xl text-sm font-mono"
-                                />
-                            </div>
-                          </>
-                      )}
-                      
-                      <div>
-                          <label className="block text-xs font-bold text-stone-400 uppercase mb-1">Internal Notes</label>
-                          <textarea 
-                             value={dispatchDetails.notes || ''}
-                             onChange={e => setDispatchDetails({...dispatchDetails, notes: e.target.value})}
-                             placeholder="Any remarks regarding packaging or insurance..."
-                             className="w-full p-3 border border-stone-200 rounded-xl text-sm h-20"
-                          />
-                      </div>
-                  </div>
-                  <div className="p-4 border-t border-stone-100 flex gap-3 justify-end">
-                      <button onClick={() => setShowDispatchModal(false)} className="px-4 py-2 text-stone-500 hover:bg-stone-100 rounded-lg text-sm font-bold">Cancel</button>
-                      <button 
-                        onClick={() => updateOrderStatus(selectedOrder.id, 'dispatched', dispatchDetails)}
-                        disabled={dispatchLoading}
-                        className="px-6 py-2 bg-stone-900 text-white rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-gold-600 transition"
-                      >
-                          {dispatchLoading ? <Loader2 className="animate-spin" size={16}/> : <Truck size={16}/>} Mark Dispatched
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+               {/* INTEL / ANALYTICS */}
+               {activeView === 'intelligence' && (
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <h3 className="font-bold text-white mb-4 flex items-center gap-2"><MapPin size={18}/> Regional Demand</h3>
+                           <div className="space-y-3">
+                               {intelligence?.regionalDemand?.slice(0, 5).map((d: any, i: number) => (
+                                   <div key={i} className="flex justify-between items-center p-3 bg-slate-950 rounded-lg">
+                                       <div>
+                                           <p className="font-bold text-white">{d.pincode}</p>
+                                           <p className="text-xs text-slate-500">{d.category}</p>
+                                       </div>
+                                       <div className="text-right">
+                                           <p className="font-bold text-teal-500">{d.demand_score}</p>
+                                           <p className="text-[10px] text-slate-600 uppercase">Interest Score</p>
+                                       </div>
+                                   </div>
+                               ))}
+                           </div>
+                       </div>
+                       <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800">
+                           <h3 className="font-bold text-white mb-4 flex items-center gap-2"><Smartphone size={18}/> Engagement Metrics</h3>
+                           <div className="space-y-3">
+                               {intelligence?.engagement?.slice(0, 5).map((e: any, i: number) => (
+                                   <div key={i} className="flex justify-between items-center p-3 bg-slate-950 rounded-lg">
+                                       <div className="truncate flex-1 pr-4">
+                                           <p className="font-bold text-white truncate">{e.productTitle}</p>
+                                       </div>
+                                       <div className="text-right shrink-0">
+                                           <p className="font-bold text-purple-400">{Math.round(e.avg_time_seconds)}s</p>
+                                           <p className="text-[10px] text-slate-600 uppercase">Avg View Time</p>
+                                       </div>
+                                   </div>
+                               ))}
+                           </div>
+                       </div>
+                   </div>
+               )}
+           </div>
+       </div>
 
-      {/* Global Image Viewer */}
-      {zoomImage && (
-          <ImageViewer 
-              images={[zoomImage]} 
-              initialIndex={0} 
-              onClose={() => setZoomImage(null)} 
-          />
-      )}
+       {/* --- MODALS --- */}
+
+       {/* Move/Category Modal */}
+       {showMoveModal && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
+                   <h3 className="text-xl font-bold text-white mb-4">Relocate Assets</h3>
+                   <div className="space-y-4">
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Target Category</label>
+                           <select 
+                               value={moveTarget.category}
+                               onChange={e => setMoveTarget({...moveTarget, category: e.target.value, subCategory: ''})}
+                               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white"
+                           >
+                               <option value="">Select Category</option>
+                               {config?.categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                           </select>
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Target Sub-Category</label>
+                           <select 
+                               value={moveTarget.subCategory}
+                               onChange={e => setMoveTarget({...moveTarget, subCategory: e.target.value})}
+                               disabled={!moveTarget.category}
+                               className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white disabled:opacity-50"
+                           >
+                               <option value="">Select Sub-Category</option>
+                               {config?.categories.find(c => c.name === moveTarget.category)?.subCategories.map(s => (
+                                   <option key={s} value={s}>{s}</option>
+                               ))}
+                           </select>
+                       </div>
+                       <div className="flex gap-2 pt-4">
+                           <button onClick={() => setShowMoveModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
+                           <button onClick={handleBulkMove} disabled={actionLoading} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold">
+                               {actionLoading ? 'Moving...' : 'Move Assets'}
+                           </button>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       )}
+
+       {/* Share Private Link Modal */}
+       {shareLink && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md text-center">
+                   <div className="w-16 h-16 bg-teal-500/10 text-teal-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                       <Lock size={32}/>
+                   </div>
+                   <h3 className="text-xl font-bold text-white mb-2">Secure Link Generated</h3>
+                   <p className="text-slate-400 text-sm mb-6">This private link grants 24-hour access to the specific product for unregistered clients.</p>
+                   
+                   <div className="bg-black/50 p-4 rounded-xl border border-slate-700 flex items-center gap-3 mb-6">
+                       <p className="text-xs text-slate-300 font-mono truncate flex-1">{shareLink}</p>
+                       <button onClick={() => navigator.clipboard.writeText(shareLink)} className="text-teal-500 hover:text-white"><Copy size={16}/></button>
+                   </div>
+
+                   <button onClick={() => setShareLink(null)} className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-700">Close</button>
+               </div>
+           </div>
+       )}
+
+       {/* Access Modal */}
+       {showAccessModal && selectedCustomer && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
+                   <h3 className="text-xl font-bold text-white mb-4">Manage Access: {selectedCustomer.name}</h3>
+                   <div className="space-y-4">
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Access Duration</label>
+                           <div className="flex gap-2">
+                               {[1, 3, 7, 30].map(d => (
+                                   <button 
+                                       key={d}
+                                       onClick={() => setAccessDuration(d)}
+                                       className={`flex-1 py-2 rounded-lg text-sm font-bold border ${accessDuration === d ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-950 border-slate-800 text-slate-400'}`}
+                                   >
+                                       {d} Days
+                                   </button>
+                               ))}
+                           </div>
+                       </div>
+                       <div className="flex gap-2 pt-4">
+                           <button onClick={() => setShowAccessModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
+                           <button onClick={handleGrantAccess} className="flex-1 py-3 bg-teal-600 text-white rounded-xl font-bold">Grant Access</button>
+                       </div>
+                       <div className="pt-2 border-t border-slate-800">
+                           <button onClick={() => { storeService.blockCustomer(selectedCustomer.id).then(() => { setShowAccessModal(false); refreshData(true); }) }} className="w-full py-3 text-red-400 hover:bg-red-950/30 rounded-xl font-bold flex items-center justify-center gap-2">
+                               <ShieldCheck size={18}/> Block User
+                           </button>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       )}
+
+       {/* Dispatch Modal */}
+       {showDispatchModal && (
+           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+               <div className="bg-slate-900 p-6 rounded-2xl border border-slate-700 w-full max-w-md">
+                   <h3 className="text-xl font-bold text-white mb-4">Confirm Dispatch</h3>
+                   <div className="space-y-4">
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Mode</label>
+                           <select 
+                               value={dispatchDetails.mode} 
+                               onChange={e => setDispatchDetails({...dispatchDetails, mode: e.target.value as any})}
+                               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white"
+                           >
+                               <option value="logistics">Logistics / Courier</option>
+                               <option value="hand_to_hand">Hand-to-Hand</option>
+                               <option value="vpp">VPP</option>
+                           </select>
+                       </div>
+                       <div>
+                           <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Tracking / Reference</label>
+                           <input 
+                               value={dispatchDetails.trackingNumber || ''} 
+                               onChange={e => setDispatchDetails({...dispatchDetails, trackingNumber: e.target.value})}
+                               className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white"
+                               placeholder="AWB or Ref Number"
+                           />
+                       </div>
+                       <div className="flex gap-2 pt-4">
+                           <button onClick={() => setShowDispatchModal(false)} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-bold">Cancel</button>
+                           <button onClick={handleDispatch} disabled={dispatchLoading} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold">
+                               {dispatchLoading ? 'Processing...' : 'Mark Dispatched'}
+                           </button>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       )}
     </div>
   );
 };

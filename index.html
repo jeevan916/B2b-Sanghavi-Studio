@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -108,8 +109,28 @@
         background-color: #f8fafc; 
         margin: 0; padding: 0; 
         color: #1e293b;
+        /* Global Security Locks */
+        -webkit-touch-callout: none; /* iOS Safari Context Menu Block */
+        -webkit-user-select: none;   /* Chrome/Safari/Opera */
+        -khtml-user-select: none;    /* Konqueror */
+        -moz-user-select: none;      /* Firefox */
+        -ms-user-select: none;       /* IE/Edge */
+        user-select: none;
       }
       
+      /* 
+       * CRITICAL SECURITY: GHOST IMAGE PROTOCOL
+       * Makes all images invisible to mouse/touch interaction.
+       * Events fall through to the container below.
+       */
+      img {
+        pointer-events: none !important; 
+        -webkit-user-drag: none;
+        -khtml-user-drag: none;
+        -moz-user-drag: none;
+        -o-user-drag: none;
+      }
+
       /* Enterprise Scrollbar */
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: transparent; }
@@ -139,7 +160,8 @@
       .loaded #initial-loader { opacity: 0; visibility: hidden; pointer-events: none; }
     </style>
   </head>
-  <body>
+  <!-- Global Event Blockers attached to Body -->
+  <body oncontextmenu="return false;" ondragstart="return false;" ondrop="return false;">
     <div id="initial-loader">
         <div class="splash-logo">Sanghavi</div>
         <div class="loading-bar-container"><div class="loading-bar-progress"></div></div>
@@ -149,6 +171,17 @@
     <script>
       window.addEventListener('load', () => {
         setTimeout(() => document.body.classList.add('loaded'), 300);
+      });
+      
+      // Strict Event Interception for Asset Protection
+      document.addEventListener('contextmenu', event => event.preventDefault());
+      document.addEventListener('keydown', e => {
+        if (
+            (e.ctrlKey && (e.key === 's' || e.key === 'u' || e.key === 'p')) || 
+            e.key === 'F12'
+        ) {
+            e.preventDefault();
+        }
       });
     </script>
   </body>

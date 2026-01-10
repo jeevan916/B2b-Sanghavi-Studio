@@ -53,16 +53,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, isAdmin, onCl
     <div 
         className="bg-white rounded-lg overflow-hidden shadow-sm border border-stone-200 group flex flex-col h-full cursor-pointer select-none hover:shadow-md hover:border-gold-300 transition-all duration-300 transform" 
         onClick={() => { if(navigator.vibrate) navigator.vibrate(5); onClick?.(); }}
+        onContextMenu={(e) => e.preventDefault()}
     >
       <div className="relative aspect-square overflow-hidden bg-stone-100 border-b border-stone-100">
         <img 
             src={displayImage} 
             alt={product.title} 
-            className="w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-105" 
+            className="w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 pointer-events-none" 
             loading="lazy" 
         />
         
-        {/* CRITICAL: High-priority tap overlay to ensure 'button not working' is fixed */}
+        {/* CRITICAL: High-priority tap overlay to block direct image access */}
         <div className="absolute inset-0 z-10 bg-transparent active:bg-black/5 transition-colors duration-100" />
 
         <div className="absolute top-2 left-2 z-20 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">

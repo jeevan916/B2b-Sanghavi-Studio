@@ -153,7 +153,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
   }, [currentIndex]);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black text-white flex flex-col animate-fade-in select-none">
+    <div className="fixed inset-0 z-[100] bg-black text-white flex flex-col animate-fade-in select-none" onContextMenu={(e) => e.preventDefault()}>
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
         <div className="flex flex-col pointer-events-auto">
@@ -183,7 +183,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
             src={images[currentIndex]} 
             alt="Full Screen"
             draggable={false}
-            className="max-w-full max-h-full object-contain transition-transform duration-75 will-change-transform"
+            className="max-w-full max-h-full object-contain transition-transform duration-75 will-change-transform pointer-events-none"
             style={{ 
               transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
             }}

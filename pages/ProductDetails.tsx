@@ -13,7 +13,7 @@ export const ProductDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { addToCart, setIsCartOpen, totalItems } = useCart();
+  const { addToCart, setIsCartOpen, totalItems, cart } = useCart();
   
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -111,14 +111,20 @@ export const ProductDetails: React.FC = () => {
     touchStart.current = null;
   };
 
-  const handleAddToCart = () => {
+  const isInCart = product ? cart.some(item => item.product.id === product.id) : false;
+
+  const handleCartAction = () => {
       if (isGuest) {
           navigate('/login');
           return;
       }
       if (product) {
-          addToCart(product);
-          setIsCartOpen(true);
+          if (isInCart) {
+              setIsCartOpen(true);
+          } else {
+              addToCart(product);
+              setIsCartOpen(true);
+          }
       }
   };
 
@@ -160,9 +166,10 @@ export const ProductDetails: React.FC = () => {
 
   return (
     <div 
-        className="min-h-screen bg-stone-50 overflow-y-auto pb-20 animate-in slide-in-from-right duration-500"
+        className="min-h-screen bg-stone-50 overflow-y-auto pb-20 animate-in slide-in-from-right duration-500 select-none"
         onTouchStart={handleTouchStart} 
         onTouchEnd={handleTouchEnd}
+        onContextMenu={(e) => e.preventDefault()}
     >
       <div className="bg-white/80 backdrop-blur-md border-b border-stone-200 px-4 h-16 flex items-center justify-between sticky top-0 z-30">
         <button onClick={handleBack} className="p-2 -ml-2 text-stone-600 hover:bg-stone-100 rounded-full transition-colors"><ArrowLeft size={24} /></button>
@@ -182,22 +189,32 @@ export const ProductDetails: React.FC = () => {
       </div>
 
       <div key={product.id} className="animate-in fade-in duration-500">
-          <div className="relative aspect-square md:aspect-video bg-stone-200 overflow-hidden group select-none">
+          {/* Main Image Container - Secured with Ghost Protocol */}
+          <div 
+            className="relative aspect-square md:aspect-video bg-stone-200 overflow-hidden group select-none cursor-pointer"
+            onClick={() => setShowFullScreen(true)}
+          >
             <img 
                 src={displayPreview} 
-                className="w-full h-full object-cover" 
-                onClick={() => setShowFullScreen(true)} 
+                className="w-full h-full object-cover pointer-events-none" 
             />
+            
+            {/* Transparent Security Overlay - Intercepts Long Press */}
+            <div className="absolute inset-0 z-10 bg-transparent" />
+
             {isGuest && product.images.length > 1 && (
                <button 
-                 onClick={() => navigate('/login')}
+                 onClick={(e) => { e.stopPropagation(); navigate('/login'); }}
                  className="absolute bottom-4 right-4 z-20 bg-black/70 backdrop-blur text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 border border-white/10"
                >
                    <Lock size={12} /> +{product.images.length - 1} Locked Photos
                </button>
             )}
             <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-                <button onClick={toggleLike} className={`p-3 rounded-full backdrop-blur shadow-sm transition-all ${isLiked ? 'bg-red-500 text-white' : 'bg-white/70 text-stone-400'}`}>
+                <button 
+                    onClick={(e) => { e.stopPropagation(); toggleLike(); }} 
+                    className={`p-3 rounded-full backdrop-blur shadow-sm transition-all ${isLiked ? 'bg-red-500 text-white' : 'bg-white/70 text-stone-400'}`}
+                >
                      <Heart size={20} fill={isLiked ? "currentColor" : "none"} />
                 </button>
             </div>
@@ -244,10 +261,14 @@ export const ProductDetails: React.FC = () => {
 
              <div className="flex gap-4">
                 <button 
-                  onClick={handleAddToCart}
-                  className="flex-1 py-4 bg-stone-900 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-gold-600 transition active:scale-[0.98]"
+                  onClick={handleCartAction}
+                  className={`flex-1 py-4 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition active:scale-[0.98] ${isInCart ? 'bg-gold-600' : 'bg-stone-900 hover:bg-gold-600'}`}
                 >
-                  <ShoppingBag size={20} /> {isGuest ? 'Login to Order' : 'Add to Order Cart'}
+                  {isInCart ? (
+                      <><Check size={20} /> In Bag</>
+                  ) : (
+                      <><ShoppingBag size={20} /> {isGuest ? 'Login to Order' : 'Add to Order Cart'}</>
+                  )}
                 </button>
              </div>
           </div>

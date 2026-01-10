@@ -88,7 +88,7 @@ const createTables = async () => {
             `CREATE TABLE IF NOT EXISTS customers (
                 id VARCHAR(255) PRIMARY KEY, phone VARCHAR(50) UNIQUE, name VARCHAR(255),
                 pincode VARCHAR(20), address TEXT, lastLocation JSON, role VARCHAR(50), createdAt DATETIME,
-                isVerified BOOLEAN DEFAULT FALSE, accessExpiresAt DATETIME
+                isVerified BOOLEAN DEFAULT FALSE, isBlocked BOOLEAN DEFAULT FALSE, accessExpiresAt DATETIME
             )`,
             `CREATE TABLE IF NOT EXISTS app_config (id INT PRIMARY KEY DEFAULT 1, data JSON, CHECK (id = 1))`,
             `CREATE TABLE IF NOT EXISTS analytics (
@@ -118,6 +118,7 @@ const createTables = async () => {
 
         // Migrations
         try { await pool.query(`ALTER TABLE customers ADD COLUMN isVerified BOOLEAN DEFAULT FALSE`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE customers ADD COLUMN isBlocked BOOLEAN DEFAULT FALSE`); } catch (e) {}
         try { await pool.query(`ALTER TABLE customers ADD COLUMN accessExpiresAt DATETIME`); } catch (e) {}
         try { await pool.query(`ALTER TABLE customers ADD COLUMN address TEXT`); } catch (e) {}
         try { await pool.query(`ALTER TABLE analytics ADD COLUMN duration INT DEFAULT 0`); } catch (e) {}
@@ -410,8 +411,8 @@ app.get('/api/customers/check/:phone', async (req, res) => {
         const [rows] = await pool.query('SELECT * FROM customers WHERE phone=?', [req.params.phone]);
         if (rows[0]) {
             // Don't send full history unless authenticated, just profile basics
-            const { id, name, pincode, isVerified, accessExpiresAt, address } = rows[0];
-            res.json({ exists: true, user: { id, name, pincode, isVerified, accessExpiresAt, address } });
+            const { id, name, pincode, isVerified, isBlocked, accessExpiresAt, address } = rows[0];
+            res.json({ exists: true, user: { id, name, pincode, isVerified, isBlocked, accessExpiresAt, address } });
         } else {
             res.json({ exists: false, user: null });
         }
@@ -448,6 +449,17 @@ app.put('/api/customers/:id/access', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put('/api/customers/:id/block', async (req, res) => {
+    try {
+        const { isBlocked } = req.body;
+        await pool.query(
+            'UPDATE customers SET isBlocked=? WHERE id=?', 
+            [isBlocked, req.params.id]
+        );
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/auth/whatsapp', async (req, res) => {
     try {
         const { phone, name, pincode, location } = req.body;
@@ -455,14 +467,17 @@ app.post('/api/auth/whatsapp', async (req, res) => {
         let user;
         if (rows[0]) {
             user = rows[0];
+            if (user.isBlocked) {
+                return res.status(403).json({ error: 'Account Blocked. Security Violation Detected.' });
+            }
             const updates = []; const values = [];
             if (name) { updates.push('name=?'); values.push(name); user.name = name; }
             if (pincode) { updates.push('pincode=?'); values.push(pincode); user.pincode = pincode; }
             if (location) { updates.push('lastLocation=?'); values.push(JSON.stringify(location)); }
             if (updates.length > 0) { values.push(user.id); await pool.query(`UPDATE customers SET ${updates.join(', ')} WHERE id=?`, values); }
         } else {
-            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date(), isVerified: false, accessExpiresAt: null, address: '' };
-            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt, isVerified, accessExpiresAt, address) VALUES (?,?,?,?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt, false, null, '']);
+            user = { id: crypto.randomUUID(), phone, name: name || `Client ${phone.slice(-4)}`, pincode: pincode || '', role: 'customer', createdAt: new Date(), isVerified: false, isBlocked: false, accessExpiresAt: null, address: '' };
+            await pool.query('INSERT INTO customers (id, phone, name, pincode, lastLocation, role, createdAt, isVerified, isBlocked, accessExpiresAt, address) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [user.id, user.phone, user.name, user.pincode, JSON.stringify(location || {}), user.role, user.createdAt, false, false, null, '']);
         }
         res.json(user);
     } catch (err) { res.status(500).json({ error: err.message }); }

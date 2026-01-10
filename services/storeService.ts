@@ -263,6 +263,20 @@ export const storeService = {
       });
   },
 
+  blockCustomer: async (userId: string) => {
+      await apiFetch(`/customers/${userId}/block`, {
+          method: 'PUT',
+          body: JSON.stringify({ isBlocked: true })
+      });
+  },
+
+  unblockCustomer: async (userId: string) => {
+      await apiFetch(`/customers/${userId}/block`, {
+          method: 'PUT',
+          body: JSON.stringify({ isBlocked: false })
+      });
+  },
+
   updateCustomerProfile: async (userId: string, updates: Partial<User>) => {
       await apiFetch(`/customers/${userId}`, {
           method: 'PUT',
@@ -278,6 +292,10 @@ export const storeService = {
   refreshUserProfile: async (phone: string): Promise<User | null> => {
       const check = await storeService.checkCustomerExistence(phone.replace(/\D/g, ''));
       if(check.exists && check.user) {
+          if (check.user.isBlocked) {
+              storeService.logout();
+              return null;
+          }
           const updatedUser = { ...check.user, role: 'customer' }; 
           localStorage.setItem(KEYS.SESSION, JSON.stringify(updatedUser));
           return updatedUser;

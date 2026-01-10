@@ -7,6 +7,7 @@ import { User } from './types';
 import { UploadProvider } from './contexts/UploadContext';
 import { CartProvider, useCart } from './contexts/CartContext';
 import { CartDrawer } from './components/CartDrawer';
+import { SecurityMonitor } from './components/SecurityMonitor';
 import { ShoppingBag } from 'lucide-react';
 
 // Safe Loader Component (No external dependencies)
@@ -90,7 +91,6 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ 
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings }))) as React.FC<{ onBack?: () => void }>;
 const CustomerLogin = lazy(() => import('./pages/CustomerLogin').then(m => ({ default: m.CustomerLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
 const StaffLogin = lazy(() => import('./pages/StaffLogin').then(m => ({ default: m.StaffLogin }))) as React.FC<{ onLoginSuccess: (u: User) => void }>;
-const CustomerProfile = lazy(() => import('./pages/CustomerProfile').then(m => ({ default: m.CustomerProfile })));
 
 const ProductDetails = lazy(() => import('./pages/ProductDetails').then(m => ({ default: m.ProductDetails })));
 const Consultant = lazy(() => import('./pages/Consultant').then(m => ({ default: m.Consultant })));
@@ -159,6 +159,7 @@ function AppContent() {
 
   return (
     <div className={`min-h-screen transition-colors duration-500 ${isStaffRoute ? 'bg-slate-950 text-slate-100' : 'bg-stone-50 text-stone-900'}`}>
+      <SecurityMonitor />
       <main className="pb-20 md:pb-0">
         <Suspense fallback={<SafeLoader />}>
           <Routes>
@@ -166,7 +167,6 @@ function AppContent() {
             <Route path="/collection" element={<Gallery />} />
             <Route path="/product/:id" element={<ProductDetails />} />
             <Route path="/shared/:token" element={<SharedLanding />} />
-            <Route path="/profile" element={user ? <CustomerProfile /> : <Navigate to="/login" replace />} />
             <Route 
                 path="/login" 
                 element={

@@ -50,6 +50,7 @@ export type User = {
   lastLogin?: string;
   createdAt?: string;
   isVerified?: boolean;       // B2B Approval Status
+  isBlocked?: boolean;        // Security Block Status
   accessExpiresAt?: string;   // Date when catalog access is revoked
 };
 
@@ -97,7 +98,7 @@ export interface AppConfig {
 
 export interface AnalyticsEvent {
   id: string;
-  type: 'inquiry' | 'screenshot' | 'view' | 'like' | 'dislike' | 'download' | 'login' | 'sold' | 'long_press' | 'b2b_order';
+  type: 'inquiry' | 'screenshot' | 'view' | 'like' | 'dislike' | 'download' | 'login' | 'sold' | 'long_press' | 'b2b_order' | 'security_block';
   productId?: string;
   productTitle?: string;
   category?: string;
